@@ -1,0 +1,43 @@
+{
+  "_comment": "Generic placeholder workflow. Replace the URL and target names for a real app. Keep credentials out of the repo; load them before generating the submitted JSON.",
+  "taskType": "workflow.execute",
+  "input": {
+    "steps": [
+      {
+        "action": "navigate",
+        "url": "https://example.com/login"
+      },
+      {
+        "action": "fill",
+        "target": {
+          "kind": "label",
+          "value": "Email"
+        },
+        "value": "${ARB_LOGIN_EMAIL}"
+      },
+      {
+        "action": "fill",
+        "target": {
+          "kind": "label",
+          "value": "Password"
+        },
+        "value": "${ARB_LOGIN_PASSWORD}"
+      },
+      {
+        "action": "click",
+        "target": {
+          "kind": "role",
+          "role": "button",
+          "name": "Sign in"
+        }
+      },
+      {
+        "action": "assert",
+        "condition": {
+          "kind": "urlIncludes",
+          "value": "/dashboard"
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "taskType": "workflow.execute",
+  "input": {
+    "steps": [
+      {
+        "action": "navigate",
+        "url": "https://example.com"
+      },
+      {
+        "action": "extract",
+        "extract": {
+          "kind": "headings",
+          "name": "pageHeadings"
+        }
+      }
+    ]
+  }
+}

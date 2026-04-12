@@ -1,0 +1,7 @@
+{
+  "taskType": "web.search",
+  "input": {
+    "engine": "google",
+    "query": "Richmond ramen"
+  }
+}
