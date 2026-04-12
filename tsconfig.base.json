@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "strict": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "baseUrl": ".",
+    "paths": {
+      "@arb/schemas": ["packages/schemas/src/index.ts"],
+      "@arb/core": ["packages/core/src/index.ts"],
+      "@arb/browser-driver": ["packages/browser-driver/src/index.ts"],
+      "@arb/task-engine": ["packages/task-engine/src/index.ts"],
+      "@arb/cli": ["packages/cli/src/index.ts"]
+    }
+  }
+}

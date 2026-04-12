@@ -1,0 +1,24 @@
+{
+  "name": "agent-runtime-browser",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.28.2",
+  "scripts": {
+    "arb": "tsx --conditions=development packages/cli/src/index.ts",
+    "build": "pnpm -r build",
+    "dev": "pnpm --filter @arb/runtime-api dev",
+    "dev:ui": "pnpm --filter @arb/monitor-ui dev",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "concurrently": "^9.1.2",
+    "happy-dom": "^15.11.7",
+    "tsup": "^8.3.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
