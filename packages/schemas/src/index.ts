@@ -169,30 +169,38 @@ export const TaskSubmissionSchema = z.discriminatedUnion("taskType", [
   })
 ]);
 
-export const StructuredElementSchema = z.object({
+export const SemanticIdentitySchema = z.object({
+  elementInstanceId: z.string(),
+  semanticElementId: z.string(),
+  locatorFingerprint: z.string(),
+  lineage: z.array(z.string())
+});
+
+export const StructuredElementSchema = SemanticIdentitySchema.extend({
   id: z.string(),
   role: z.string().optional(),
   name: z.string()
 });
 
-export const StructuredInputSchema = z.object({
+export const StructuredInputSchema = SemanticIdentitySchema.extend({
   id: z.string(),
   label: z.string(),
   type: z.string().optional()
 });
 
-export const StructuredLinkSchema = z.object({
+export const StructuredLinkSchema = SemanticIdentitySchema.extend({
   id: z.string(),
   name: z.string(),
   href: z.string().optional()
 });
 
-export const StructuredHeadingSchema = z.object({
+export const StructuredHeadingSchema = SemanticIdentitySchema.extend({
+  id: z.string(),
   level: z.number().int().min(1).max(6),
   text: z.string()
 });
 
-export const StructuredFormSchema = z.object({
+export const StructuredFormSchema = SemanticIdentitySchema.extend({
   id: z.string(),
   name: z.string()
 });
@@ -204,7 +212,47 @@ export const AvailableActionSchema = z.object({
   description: z.string()
 });
 
+export const ActionGraphActionSchema = z.object({
+  actionId: z.string(),
+  kind: z.enum([
+    "click",
+    "submit_form",
+    "navigate",
+    "open_link",
+    "toggle",
+    "focus",
+    "download",
+    "dismiss_dialog"
+  ]),
+  label: z.string().optional(),
+  targetElementId: z.string().optional(),
+  preconditions: z.array(z.string()).optional(),
+  effects: z.array(z.string()).optional(),
+  confidence: z.number().min(0).max(1).optional()
+});
+
+export const ActionGraphSchema = z.object({
+  actions: z.array(ActionGraphActionSchema)
+});
+
+export const IntentRegionSchema = z.object({
+  regionId: z.string(),
+  kind: z.enum([
+    "search_interface",
+    "auth_form",
+    "results_list",
+    "navigation_bar",
+    "modal_dialog",
+    "primary_content",
+    "secondary_content"
+  ]),
+  title: z.string().optional(),
+  primaryActions: z.array(z.string()),
+  elements: z.array(z.string())
+});
+
 export const StructuredStateSchema = z.object({
+  stateId: z.string(),
   sessionId: z.string(),
   pageId: z.string(),
   url: z.string(),
@@ -216,7 +264,62 @@ export const StructuredStateSchema = z.object({
   forms: z.array(StructuredFormSchema),
   visibleTextSummary: z.array(z.string()),
   availableActions: z.array(AvailableActionSchema),
+  actionGraph: ActionGraphSchema,
+  regions: z.array(IntentRegionSchema),
   timestamp: z.string()
+});
+
+export const StateObservationProfileSchema = z.enum([
+  "minimal",
+  "interactive_only",
+  "form_mode",
+  "navigation_mode",
+  "full"
+]);
+
+export const StateDeltaSchema = z.object({
+  taskId: z.string(),
+  fromStateId: z.string().nullable(),
+  toStateId: z.string().nullable(),
+  urlChanged: z.boolean(),
+  titleChanged: z.boolean(),
+  elementsAdded: z.array(SemanticIdentitySchema.extend({ id: z.string(), label: z.string().optional() })),
+  elementsRemoved: z.array(SemanticIdentitySchema.extend({ id: z.string(), label: z.string().optional() })),
+  actionsAdded: z.array(ActionGraphActionSchema),
+  actionsRemoved: z.array(ActionGraphActionSchema),
+  majorTextChanges: z.array(z.string()),
+  dialogChanges: z.array(z.string()),
+  timestamp: z.string()
+});
+
+export const StateQuerySchema = z.object({
+  taskId: z.string().optional(),
+  taskHint: z.string().min(1).optional(),
+  include: z.array(z.string()).default([]).optional(),
+  exclude: z.array(z.string()).default([]).optional(),
+  profile: StateObservationProfileSchema.default("full").optional()
+});
+
+export const StepEvidenceSchema = z.object({
+  stepId: z.string(),
+  beforeStateId: z.string().nullable(),
+  afterStateId: z.string().nullable(),
+  observedEffects: z.array(z.string()),
+  domDeltaSummary: z.string(),
+  networkSummary: z.string(),
+  consoleSummary: z.string(),
+  assertionEvidence: z.record(z.unknown()).nullable()
+});
+
+export const CapabilitiesSchema = z.object({
+  structuredState: z.object({ supported: z.boolean(), profiles: z.array(StateObservationProfileSchema) }),
+  actionGraph: z.object({ supported: z.boolean() }),
+  stateDelta: z.object({ supported: z.boolean() }),
+  preview: z.object({ supported: z.boolean(), mode: z.literal("snapshot") }),
+  download: z.object({ supported: z.boolean() }),
+  frame: z.object({ supported: z.boolean(), supportLevel: z.string() }),
+  shadowDom: z.object({ supported: z.boolean(), supportLevel: z.string() }),
+  canvasSemantic: z.object({ supported: z.boolean(), supportLevel: z.string() })
 });
 
 export const LogEntrySchema = z.object({
@@ -240,6 +343,7 @@ export const TaskResultSchema = z.object({
   state: StructuredStateSchema.nullable(),
   extractedData: z.record(z.unknown()),
   logs: z.array(LogEntrySchema),
+  evidence: z.array(StepEvidenceSchema),
   startedAt: z.string(),
   finishedAt: z.string().nullable(),
   error: RuntimeErrorSchema.nullable()
@@ -253,6 +357,11 @@ export type ExtractSpec = z.infer<typeof ExtractSpecSchema>;
 export type AssertCondition = z.infer<typeof AssertConditionSchema>;
 export type TaskStep = z.infer<typeof TaskStepSchema>;
 export type TaskSubmission = z.infer<typeof TaskSubmissionSchema>;
+export type StateObservationProfile = z.infer<typeof StateObservationProfileSchema>;
 export type StructuredState = z.infer<typeof StructuredStateSchema>;
+export type StateDelta = z.infer<typeof StateDeltaSchema>;
+export type StateQuery = z.infer<typeof StateQuerySchema>;
+export type StepEvidence = z.infer<typeof StepEvidenceSchema>;
+export type Capabilities = z.infer<typeof CapabilitiesSchema>;
 export type LogEntry = z.infer<typeof LogEntrySchema>;
 export type TaskResult = z.infer<typeof TaskResultSchema>;

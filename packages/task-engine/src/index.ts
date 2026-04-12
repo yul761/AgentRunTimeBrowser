@@ -2,6 +2,7 @@ import type { BrowserDriver } from "@arb/browser-driver";
 import { PlaywrightBrowserDriver } from "@arb/browser-driver";
 import {
   RuntimeFailure,
+  computeStateDelta,
   createLogEntry,
   normalizeRuntimeError,
   type PreviewSnapshot,
@@ -10,6 +11,7 @@ import {
 } from "@arb/core";
 import {
   TaskSubmissionSchema,
+  type StepEvidence,
   type StructuredState,
   type TaskStep,
   type TaskSubmission
@@ -83,9 +85,19 @@ export class TaskEngine {
         this.appendLog(taskId, `Starting step ${index + 1}/${steps.length}: ${step.action}`, index, step.action);
 
         try {
+          const beforeState = state;
+          const beforeDriverLogCount = driver.getLogs().length;
           await this.executeStep(driver, step, extractedData);
           state = await driver.getStructuredState();
           previewSnapshot = await driver.getPreviewSnapshot();
+          const evidence = createStepEvidence({
+            taskId,
+            step,
+            index,
+            beforeState,
+            afterState: state,
+            driverLogs: driver.getLogs().slice(beforeDriverLogCount)
+          });
           this.store.updateTask(taskId, {
             completedSteps: index + 1,
             finalUrl: state.url,
@@ -94,9 +106,11 @@ export class TaskEngine {
             previewSnapshot,
             extractedData: { ...extractedData }
           });
+          this.store.appendEvidence(taskId, evidence);
           this.appendLog(taskId, `Completed step ${index + 1}/${steps.length}: ${step.action}`, index, step.action, {
             url: state.url,
-            title: state.title
+            title: state.title,
+            evidenceStepId: evidence.stepId
           });
         } catch (error) {
           const normalized = normalizeRuntimeError(
@@ -257,4 +271,61 @@ export function planSteps(submission: TaskSubmission): TaskStep[] {
       }
     }
   ];
+}
+
+function createStepEvidence(input: {
+  taskId: string;
+  step: TaskStep;
+  index: number;
+  beforeState: StructuredState | null;
+  afterState: StructuredState;
+  driverLogs: string[];
+}): StepEvidence {
+  const delta = computeStateDelta(input.taskId, input.beforeState, input.afterState);
+  const observedEffects = [
+    delta.urlChanged ? "url_changed" : null,
+    delta.titleChanged ? "title_changed" : null,
+    delta.elementsAdded.length > 0 ? `${delta.elementsAdded.length} elements_added` : null,
+    delta.elementsRemoved.length > 0 ? `${delta.elementsRemoved.length} elements_removed` : null,
+    delta.actionsAdded.length > 0 ? `${delta.actionsAdded.length} actions_added` : null,
+    delta.actionsRemoved.length > 0 ? `${delta.actionsRemoved.length} actions_removed` : null,
+    delta.majorTextChanges.length > 0 ? "text_changed" : null,
+    delta.dialogChanges.length > 0 ? "dialog_changed" : null
+  ].filter((value): value is string => Boolean(value));
+
+  return {
+    stepId: `${input.taskId}:step-${input.index + 1}`,
+    beforeStateId: input.beforeState?.stateId ?? null,
+    afterStateId: input.afterState.stateId,
+    observedEffects,
+    domDeltaSummary: summarizeDomDelta(delta),
+    networkSummary: input.step.action === "navigate" || delta.urlChanged ? "navigation observed or expected" : "no navigation observed",
+    consoleSummary: summarizeConsoleEvents(input.driverLogs),
+    assertionEvidence:
+      input.step.action === "assert"
+        ? {
+            condition: input.step.condition,
+            passed: true
+          }
+        : null
+  };
+}
+
+function summarizeDomDelta(delta: ReturnType<typeof computeStateDelta>): string {
+  const parts = [
+    delta.urlChanged ? "URL changed" : null,
+    delta.titleChanged ? "title changed" : null,
+    delta.elementsAdded.length ? `${delta.elementsAdded.length} elements added` : null,
+    delta.elementsRemoved.length ? `${delta.elementsRemoved.length} elements removed` : null,
+    delta.actionsAdded.length ? `${delta.actionsAdded.length} actions added` : null,
+    delta.actionsRemoved.length ? `${delta.actionsRemoved.length} actions removed` : null,
+    delta.majorTextChanges.length ? `${delta.majorTextChanges.length} new text summaries` : null,
+    delta.dialogChanges.length ? `${delta.dialogChanges.length} dialog changes` : null
+  ].filter(Boolean);
+  return parts.length > 0 ? parts.join("; ") : "no major structured state changes";
+}
+
+function summarizeConsoleEvents(driverLogs: string[]): string {
+  const consoleEvents = driverLogs.filter((line) => line.includes("browser console") || line.includes("page error"));
+  return consoleEvents.length > 0 ? consoleEvents.join("\n") : "no browser console events captured";
 }

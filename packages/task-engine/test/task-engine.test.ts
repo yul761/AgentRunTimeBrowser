@@ -4,6 +4,13 @@ import type { AssertCondition, StructuredState, Target, WaitCondition } from "@a
 import { describe, expect, it } from "vitest";
 import { TaskEngine, planSteps } from "../src/index";
 
+const identity = (kind: string, label: string, index: number) => ({
+  elementInstanceId: `inst-page-1-${kind}-${index}`,
+  semanticElementId: `sem-${kind}-${index}`,
+  locatorFingerprint: `${kind}:${label}`,
+  lineage: ["body", kind]
+});
+
 class MockDriver implements BrowserDriver {
   readonly sessionId = "session-1";
   readonly pageId = "page-1";
@@ -44,17 +51,40 @@ class MockDriver implements BrowserDriver {
 
   async getStructuredState(): Promise<StructuredState> {
     return {
+      stateId: `state-${this.calls.length}`,
       sessionId: this.sessionId,
       pageId: this.pageId,
       url: "https://example.com",
       title: "Example",
-      buttons: [{ id: "button-0", role: "button", name: "Submit" }],
-      inputs: [{ id: "input-0", label: "Search", type: "search" }],
-      links: [{ id: "link-0", name: "Docs", href: "/docs" }],
-      headings: [{ level: 1, text: "Example" }],
-      forms: [],
+      buttons: [{ id: "button-0", ...identity("button", "Submit", 0), role: "button", name: "Submit" }],
+      inputs: [{ id: "input-0", ...identity("input", "Search", 0), label: "Search", type: "search" }],
+      links: [{ id: "link-0", ...identity("link", "Docs", 0), name: "Docs", href: "/docs" }],
+      headings: [{ id: "heading-0", ...identity("heading", "Example", 0), level: 1, text: "Example" }],
+      forms: [{ id: "form-0", ...identity("form", "Search form", 0), name: "Search form" }],
       visibleTextSummary: ["Example body text"],
       availableActions: [],
+      actionGraph: {
+        actions: [
+          {
+            actionId: "ag-button-sem-button-0",
+            kind: "submit_form",
+            label: "Submit",
+            targetElementId: "sem-button-0",
+            preconditions: ["target_visible"],
+            effects: ["form_may_submit"],
+            confidence: 0.84
+          }
+        ]
+      },
+      regions: [
+        {
+          regionId: "region-search",
+          kind: "search_interface",
+          title: "Search form",
+          primaryActions: ["ag-button-sem-button-0"],
+          elements: ["sem-button-0", "sem-input-0"]
+        }
+      ],
       timestamp: new Date().toISOString()
     };
   }
@@ -102,7 +132,9 @@ describe("task engine", () => {
 
     expect(record.status).toBe("success");
     expect(record.completedSteps).toBe(3);
-    expect(record.extractedData.headings).toEqual([{ level: 1, text: "Example" }]);
+    expect(record.extractedData.headings).toMatchObject([{ level: 1, text: "Example" }]);
+    expect(record.evidence).toHaveLength(3);
+    expect(record.evidence[0]?.afterStateId).toMatch(/^state-/);
     expect(record.logs.some((log) => log.message.includes("Completed step 3"))).toBe(true);
     expect(driver.calls).toContain("fill:ramen");
   });

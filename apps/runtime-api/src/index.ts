@@ -1,5 +1,14 @@
 import { PlaywrightBrowserDriver } from "@arb/browser-driver";
-import { InMemoryTaskStore, RuntimeFailure, normalizeRuntimeError, type TaskStore } from "@arb/core";
+import {
+  InMemoryTaskStore,
+  RuntimeFailure,
+  computeStateDelta,
+  normalizeRuntimeError,
+  profileStructuredState,
+  queryStructuredState,
+  type TaskStore
+} from "@arb/core";
+import { StateObservationProfileSchema, StateQuerySchema } from "@arb/schemas";
 import { TaskEngine } from "@arb/task-engine";
 import cors from "cors";
 import express, { type Express, type Request, type Response } from "express";
@@ -26,8 +35,24 @@ export function createApp(services = createRuntimeServices()): Express {
       ok: true,
       service: "agent-runtime-browser",
       positioning:
-        "Agent Runtime Browser is a structured browser execution environment for agents.",
+        "Agent Runtime Browser is a browser-native agent interface layer for structured browser execution.",
       timestamp: new Date().toISOString()
+    });
+  });
+
+  app.get("/capabilities", (_req, res) => {
+    res.json({
+      structuredState: {
+        supported: true,
+        profiles: ["minimal", "interactive_only", "form_mode", "navigation_mode", "full"]
+      },
+      actionGraph: { supported: true },
+      stateDelta: { supported: true },
+      preview: { supported: true, mode: "snapshot" },
+      download: { supported: false },
+      frame: { supported: false, supportLevel: "not_exposed_in_mvp" },
+      shadowDom: { supported: true, supportLevel: "best_effort_open_shadow_dom_via_dom_selectors" },
+      canvasSemantic: { supported: false, supportLevel: "not_supported_without_app_semantics" }
     });
   });
 
@@ -72,10 +97,52 @@ export function createApp(services = createRuntimeServices()): Express {
     if (!task) {
       return;
     }
+    const parsedProfile = StateObservationProfileSchema.safeParse(req.query.profile ?? "full");
+    if (!parsedProfile.success) {
+      res.status(400).json({
+        error: {
+          code: "VALIDATION_ERROR",
+          message: "Invalid state observation profile",
+          details: { profiles: ["minimal", "interactive_only", "form_mode", "navigation_mode", "full"] },
+          timestamp: new Date().toISOString()
+        }
+      });
+      return;
+    }
     res.json({
       taskId: task.taskId,
-      state: task.state
+      profile: parsedProfile.data,
+      state: profileStructuredState(task.state, parsedProfile.data)
     });
+  });
+
+  app.get("/tasks/:id/state-delta", (req, res) => {
+    const task = getTaskOr404(services.store, req, res);
+    if (!task) {
+      return;
+    }
+    const since = typeof req.query.since === "string" ? req.query.since : null;
+    const fromState = since
+      ? task.stateHistory.find((state) => state.stateId === since) ?? null
+      : task.stateHistory.at(-2) ?? null;
+    res.json(computeStateDelta(task.taskId, fromState, task.state));
+  });
+
+  app.get("/tasks/:id/state/stream", (req, res) => {
+    const task = getTaskOr404(services.store, req, res);
+    if (!task) {
+      return;
+    }
+    res.setHeader("content-type", "text/event-stream");
+    res.setHeader("cache-control", "no-cache");
+    res.setHeader("connection", "keep-alive");
+    res.write(`event: state\n`);
+    res.write(`data: ${JSON.stringify({ taskId: task.taskId, state: task.state })}\n\n`);
+    const unsubscribe = services.store.subscribeStateChanges(task.taskId, (state) => {
+      res.write(`event: state\n`);
+      res.write(`data: ${JSON.stringify({ taskId: task.taskId, state })}\n\n`);
+    });
+    req.on("close", unsubscribe);
   });
 
   app.get("/tasks/:id/logs", (req, res) => {
@@ -86,6 +153,50 @@ export function createApp(services = createRuntimeServices()): Express {
     res.json({
       taskId: task.taskId,
       logs: task.logs
+    });
+  });
+
+  app.get("/tasks/:id/evidence", (req, res) => {
+    const task = getTaskOr404(services.store, req, res);
+    if (!task) {
+      return;
+    }
+    res.json({
+      taskId: task.taskId,
+      evidence: task.evidence
+    });
+  });
+
+  app.post("/state/query", (req, res) => {
+    const parsed = StateQuerySchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({
+        error: {
+          code: "VALIDATION_ERROR",
+          message: "Invalid state query",
+          details: { issues: parsed.error.issues },
+          timestamp: new Date().toISOString()
+        }
+      });
+      return;
+    }
+    const task = parsed.data.taskId
+      ? services.store.getTask(parsed.data.taskId)
+      : services.store.listTasks().find((record) => record.state);
+    if (!task) {
+      res.status(404).json({
+        error: {
+          code: "TARGET_NOT_FOUND",
+          message: "No task with structured state was found for this query",
+          timestamp: new Date().toISOString()
+        }
+      });
+      return;
+    }
+    res.json({
+      taskId: task.taskId,
+      query: parsed.data,
+      state: queryStructuredState(task.state, parsed.data)
     });
   });
 
