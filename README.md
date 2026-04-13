@@ -4,7 +4,11 @@ Agent Runtime Browser is a structured browser execution environment for agents. 
 
 It is also a browser-native agent interface layer: it exposes page state, inferred actions, stable semantic element identity, and state transitions as structured primitives for agents.
 
+The project is evolving toward Agentability Audit: a local-first toolkit for measuring whether owned websites, staging apps, and agent-friendly web flows expose enough semantics, executable actions, state feedback, and evidence for AI agents to complete tasks reliably.
+
 This is not a chat agent, not a natural-language browser assistant, not a vision-first browser agent, and not a generic wrapper around Playwright. Playwright is an internal browser engine dependency; the public product interface is the runtime task protocol plus the `arb` CLI.
+
+This project is not meant to bypass sites that block automation. It is for consent-based agent access: teams that want their own web apps or customer-facing flows to be understandable, safe, and debuggable for trusted agents.
 
 ## Architecture
 
@@ -131,6 +135,8 @@ pnpm arb tasks
 pnpm arb task <taskId>
 pnpm arb state <taskId>
 pnpm arb logs <taskId>
+pnpm arb audit https://example.com
+pnpm arb audit ./baseline/search-fixture.html --task page,search --out benchmark-results/audit-fixture.json
 ```
 
 Use another API URL:
@@ -138,6 +144,44 @@ Use another API URL:
 ```bash
 pnpm arb --api-url http://localhost:8787 tasks
 ```
+
+## Benchmarking
+
+The repo includes a baseline LLM browser agent for comparison against the structured runtime:
+
+```bash
+pnpm baseline
+pnpm compare
+```
+
+`pnpm baseline` runs one target selected by `BASELINE_TARGET` (`google`, `fixture`, `complex_fixture`, or `live_web`) and writes `benchmark-results/baseline.json`.
+
+`pnpm compare` runs the baseline agent plus two runtime modes:
+
+- `runtime_observed`: captures preview snapshots and step evidence.
+- `runtime_lean`: skips preview snapshots and step evidence for lower fixed overhead.
+
+Use `COMPARE_TARGETS=complex_fixture,live_web pnpm compare` to run a smaller matrix.
+
+## Agentability Audit
+
+`arb audit` checks whether a page is structurally ready for AI-agent use. It reads the runtime's structured browser state, scores the page, runs optional deterministic probes, and emits issues with evidence and repair guidance.
+
+Current MVP scoring dimensions:
+
+- Semantic discoverability: agents can find labels, roles, headings, forms, and regions.
+- Actionability: executable controls can be inferred without ambiguous labels.
+- State feedback: task probes can observe useful URL, title, text, or region changes after actions.
+- Recoverability: exposed elements have semantic IDs, locator fingerprints, and lineage.
+- Agent safety: paid or risky content should be distinguishable from primary task content.
+
+Example:
+
+```bash
+pnpm arb audit ./baseline/search-fixture.html --task page,search
+```
+
+Output includes an overall score, category scores, task probe results, and prioritized issues such as duplicate button names or missing labels. Use `--json` for the full report or `--out <path>` to save it.
 
 ## Task Protocol
 
@@ -164,6 +208,24 @@ Preferred target forms:
 - `{ "kind": "testId", "value": "submit" }`
 
 CSS targets are supported as an internal fallback, not as the preferred public path.
+
+Task submissions can include optional runtime execution settings:
+
+```json
+{
+  "taskType": "workflow.execute",
+  "runtime": {
+    "capturePreview": false,
+    "captureEvidence": false,
+    "observationProfile": "interactive_only"
+  },
+  "input": {
+    "steps": [{ "action": "navigate", "url": "https://example.com" }]
+  }
+}
+```
+
+The lean runtime mode is intended for agent-to-runtime execution where the agent needs structured state and results but does not need a human preview snapshot for every step.
 
 ## Browser-Native Agent Primitives
 
