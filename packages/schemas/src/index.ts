@@ -153,15 +153,31 @@ export const TaskStepSchema = z.discriminatedUnion("action", [
   })
 ]);
 
+export const StateObservationProfileSchema = z.enum([
+  "minimal",
+  "interactive_only",
+  "form_mode",
+  "navigation_mode",
+  "full"
+]);
+
+export const TaskRuntimeOptionsSchema = z.object({
+  capturePreview: z.boolean().optional(),
+  captureEvidence: z.boolean().optional(),
+  observationProfile: StateObservationProfileSchema.optional()
+});
+
 export const TaskSubmissionSchema = z.discriminatedUnion("taskType", [
   z.object({
     taskType: z.literal("workflow.execute"),
+    runtime: TaskRuntimeOptionsSchema.optional(),
     input: z.object({
       steps: z.array(TaskStepSchema).min(1)
     })
   }),
   z.object({
     taskType: z.literal("web.search"),
+    runtime: TaskRuntimeOptionsSchema.optional(),
     input: z.object({
       engine: z.literal("google"),
       query: z.string().min(1)
@@ -269,14 +285,6 @@ export const StructuredStateSchema = z.object({
   timestamp: z.string()
 });
 
-export const StateObservationProfileSchema = z.enum([
-  "minimal",
-  "interactive_only",
-  "form_mode",
-  "navigation_mode",
-  "full"
-]);
-
 export const StateDeltaSchema = z.object({
   taskId: z.string(),
   fromStateId: z.string().nullable(),
@@ -309,6 +317,52 @@ export const StepEvidenceSchema = z.object({
   networkSummary: z.string(),
   consoleSummary: z.string(),
   assertionEvidence: z.record(z.unknown()).nullable()
+});
+
+export const AuditIssueSchema = z.object({
+  id: z.string(),
+  severity: z.enum(["info", "low", "medium", "high"]),
+  category: z.enum([
+    "semantic_discoverability",
+    "actionability",
+    "state_feedback",
+    "recoverability",
+    "agent_safety"
+  ]),
+  title: z.string(),
+  message: z.string(),
+  evidence: z.record(z.unknown()).optional(),
+  recommendation: z.string().optional()
+});
+
+export const AuditScoresSchema = z.object({
+  overall: z.number().int().min(0).max(100),
+  semanticDiscoverability: z.number().int().min(0).max(100),
+  actionability: z.number().int().min(0).max(100),
+  stateFeedback: z.number().int().min(0).max(100),
+  recoverability: z.number().int().min(0).max(100),
+  agentSafety: z.number().int().min(0).max(100)
+});
+
+export const AuditTaskProbeSchema = z.object({
+  task: z.enum(["page", "search"]),
+  status: z.enum(["passed", "failed", "skipped"]),
+  steps: z.number().int().nonnegative(),
+  observedEffects: z.array(z.string()),
+  error: z.string().nullable(),
+  evidence: z.record(z.unknown()).optional()
+});
+
+export const AuditReportSchema = z.object({
+  reportId: z.string(),
+  url: z.string(),
+  finalUrl: z.string(),
+  title: z.string(),
+  generatedAt: z.string(),
+  scores: AuditScoresSchema,
+  issues: z.array(AuditIssueSchema),
+  taskProbes: z.array(AuditTaskProbeSchema),
+  state: StructuredStateSchema
 });
 
 export const CapabilitiesSchema = z.object({
@@ -356,12 +410,17 @@ export type WaitCondition = z.infer<typeof WaitConditionSchema>;
 export type ExtractSpec = z.infer<typeof ExtractSpecSchema>;
 export type AssertCondition = z.infer<typeof AssertConditionSchema>;
 export type TaskStep = z.infer<typeof TaskStepSchema>;
+export type TaskRuntimeOptions = z.infer<typeof TaskRuntimeOptionsSchema>;
 export type TaskSubmission = z.infer<typeof TaskSubmissionSchema>;
 export type StateObservationProfile = z.infer<typeof StateObservationProfileSchema>;
 export type StructuredState = z.infer<typeof StructuredStateSchema>;
 export type StateDelta = z.infer<typeof StateDeltaSchema>;
 export type StateQuery = z.infer<typeof StateQuerySchema>;
 export type StepEvidence = z.infer<typeof StepEvidenceSchema>;
+export type AuditIssue = z.infer<typeof AuditIssueSchema>;
+export type AuditScores = z.infer<typeof AuditScoresSchema>;
+export type AuditTaskProbe = z.infer<typeof AuditTaskProbeSchema>;
+export type AuditReport = z.infer<typeof AuditReportSchema>;
 export type Capabilities = z.infer<typeof CapabilitiesSchema>;
 export type LogEntry = z.infer<typeof LogEntrySchema>;
 export type TaskResult = z.infer<typeof TaskResultSchema>;

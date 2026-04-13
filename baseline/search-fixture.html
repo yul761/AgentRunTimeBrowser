@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Baseline Search Fixture</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 0;
+        color: #17202a;
+        background: #f5f7f8;
+      }
+      header,
+      nav,
+      main,
+      aside {
+        padding: 16px 24px;
+      }
+      header {
+        background: #ffffff;
+        border-bottom: 1px solid #d8dee4;
+      }
+      nav {
+        display: flex;
+        gap: 12px;
+        background: #eef3f5;
+      }
+      main {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 320px;
+        gap: 20px;
+      }
+      form[role="search"],
+      .filters,
+      .result,
+      .map,
+      .sponsored,
+      .details {
+        background: #ffffff;
+        border: 1px solid #d8dee4;
+        border-radius: 8px;
+        padding: 16px;
+      }
+      input,
+      select,
+      button {
+        font: inherit;
+      }
+      input[type="search"] {
+        width: min(520px, 100%);
+        padding: 10px;
+      }
+      button {
+        border: 1px solid #8a949e;
+        border-radius: 8px;
+        background: #ffffff;
+        padding: 8px 12px;
+      }
+      .filters {
+        display: flex;
+        gap: 16px;
+        flex-wrap: wrap;
+        margin-top: 12px;
+      }
+      .result {
+        margin-top: 12px;
+      }
+      .meta {
+        color: #5f6b76;
+      }
+      .badge {
+        display: inline-block;
+        border: 1px solid #9aa6b2;
+        border-radius: 8px;
+        padding: 2px 6px;
+        margin-right: 6px;
+      }
+      .sponsored {
+        margin-top: 12px;
+        border-style: dashed;
+      }
+      dialog {
+        border: 1px solid #8a949e;
+        border-radius: 8px;
+        max-width: 420px;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Metro Food Search</h1>
+      <p>Local fixture for repeatable browser-agent benchmarks.</p>
+    </header>
+
+    <nav aria-label="Primary navigation">
+      <a href="#results">Results</a>
+      <a href="#map">Map</a>
+      <a href="#filters">Filters</a>
+      <button type="button" id="open-help">Help</button>
+    </nav>
+
+    <main>
+      <section aria-label="Search workspace">
+        <form role="search" aria-label="Search ramen listings" id="search-form">
+          <label for="q">Search</label>
+          <input id="q" name="q" type="search" value="Richmond ramen" aria-label="Search" />
+          <button type="submit">Search</button>
+        </form>
+
+        <section class="filters" id="filters" aria-label="Filters">
+          <label>
+            <input type="checkbox" name="openNow" />
+            Open now
+          </label>
+          <label>
+            Cuisine
+            <select name="cuisine" aria-label="Cuisine">
+              <option>Ramen</option>
+              <option>Japanese</option>
+              <option>Noodles</option>
+            </select>
+          </label>
+          <label>
+            Sort
+            <select name="sort" aria-label="Sort results">
+              <option>Relevance</option>
+              <option>Rating</option>
+              <option>Distance</option>
+            </select>
+          </label>
+          <button type="button" id="sort-rating">Sort by rating</button>
+          <button type="button" id="apply-filters">Apply filters</button>
+          <p class="meta" id="filter-summary">Filters are not applied yet.</p>
+        </section>
+
+        <section class="sponsored" aria-label="Sponsored result">
+          <p class="meta">Sponsored</p>
+          <a href="https://example.test/sponsored-noodle-app"><h3>Instant Noodle Delivery App</h3></a>
+          <p>Decorative benchmark noise; not a local ramen result.</p>
+        </section>
+
+        <section id="results" aria-label="Search results">
+          <h2>Search results for Richmond ramen</h2>
+          <article class="result" data-rating="4.7" data-distance="1.2">
+            <a href="https://example.test/ramen-danbo-richmond"><h3>Ramen DANBO Richmond</h3></a>
+            <p class="meta"><span class="badge">Open now</span><span class="badge">4.7</span><span class="badge">1.2 km</span></p>
+            <p>Popular ramen shop in Richmond with tonkotsu and shio options.</p>
+            <button type="button" data-details="Ramen DANBO Richmond">View details</button>
+          </article>
+          <article class="result" data-rating="4.5" data-distance="2.1">
+            <a href="https://example.test/g-men-ramen"><h3>G-Men Ramen Richmond</h3></a>
+            <p class="meta"><span class="badge">Open now</span><span class="badge">4.5</span><span class="badge">2.1 km</span></p>
+            <p>Local ramen spot with rich broth and casual seating.</p>
+            <button type="button" data-details="G-Men Ramen Richmond">View details</button>
+          </article>
+          <article class="result" data-rating="4.4" data-distance="2.5">
+            <a href="https://example.test/afuri-ramen-richmond"><h3>AFURI Ramen Richmond Centre</h3></a>
+            <p class="meta"><span class="badge">Open now</span><span class="badge">4.4</span><span class="badge">2.5 km</span></p>
+            <p>Yuzu-style ramen and small plates near transit.</p>
+            <button type="button" data-details="AFURI Ramen Richmond Centre">View details</button>
+          </article>
+          <article class="result" data-rating="4.2" data-distance="3.2">
+            <a href="https://example.test/kintaro-richmond"><h3>Kintaro Ramen near Richmond</h3></a>
+            <p class="meta"><span class="badge">Open now</span><span class="badge">4.2</span><span class="badge">3.2 km</span></p>
+            <p>Classic ramen listing included for the benchmark.</p>
+            <button type="button" data-details="Kintaro Ramen near Richmond">View details</button>
+          </article>
+          <article class="result" data-rating="4.1" data-distance="3.8">
+            <a href="https://example.test/marutama-richmond"><h3>Marutama Ramen Richmond options</h3></a>
+            <p class="meta"><span class="badge">Open now</span><span class="badge">4.1</span><span class="badge">3.8 km</span></p>
+            <p>Chicken broth ramen result with ordering notes.</p>
+            <button type="button" data-details="Marutama Ramen Richmond options">View details</button>
+          </article>
+        </section>
+      </section>
+
+      <aside>
+        <section class="map" id="map" aria-label="Map preview">
+          <h2>Map preview</h2>
+          <p>Five ramen results clustered around Richmond Centre.</p>
+        </section>
+        <section class="details" aria-label="Result details">
+          <h2>Details</h2>
+          <p id="details-output">Select a result to inspect details.</p>
+        </section>
+      </aside>
+    </main>
+
+    <dialog id="help-dialog" aria-label="Help dialog">
+      <h2>Benchmark help</h2>
+      <p>This fixture includes search, filters, navigation, sponsored content, detail buttons, and a modal.</p>
+      <button type="button" id="close-help">Close</button>
+    </dialog>
+
+    <script>
+      const form = document.querySelector("#search-form");
+      const query = document.querySelector("#q");
+      const openNow = document.querySelector("input[name='openNow']");
+      const sortRating = document.querySelector("#sort-rating");
+      const applyFilters = document.querySelector("#apply-filters");
+      const filterSummary = document.querySelector("#filter-summary");
+      const detailsOutput = document.querySelector("#details-output");
+      const helpDialog = document.querySelector("#help-dialog");
+      let sortMode = "relevance";
+
+      form.addEventListener("submit", (event) => {
+        event.preventDefault();
+        document.querySelector("#results h2").textContent = `Search results for ${query.value || "Richmond ramen"}`;
+        location.hash = "results";
+      });
+
+      sortRating.addEventListener("click", () => {
+        sortMode = "rating";
+        filterSummary.textContent = "Sort preference set to rating.";
+      });
+
+      applyFilters.addEventListener("click", () => {
+        const prefix = openNow.checked ? "Open now filtered results" : "Filtered results";
+        document.querySelector("#results h2").textContent = `${prefix} for ${query.value || "Richmond ramen"}`;
+        filterSummary.textContent = `Applied filters: ${openNow.checked ? "open now, " : ""}${sortMode}.`;
+        location.hash = "results";
+      });
+
+      document.querySelectorAll("[data-details]").forEach((button) => {
+        button.addEventListener("click", () => {
+          detailsOutput.textContent = `${button.dataset.details}: open now, benchmark listing, top Richmond ramen result.`;
+        });
+      });
+
+      document.querySelector("#open-help").addEventListener("click", () => helpDialog.showModal());
+      document.querySelector("#close-help").addEventListener("click", () => helpDialog.close());
+    </script>
+  </body>
+</html>

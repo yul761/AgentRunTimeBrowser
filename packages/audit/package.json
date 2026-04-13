@@ -1,11 +1,8 @@
 {
-  "name": "@arb/cli",
+  "name": "@arb/audit",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "bin": {
-    "arb": "./dist/index.js"
-  },
   "main": "./dist/index.js",
   "types": "./src/index.ts",
   "exports": {
@@ -17,13 +14,12 @@
   },
   "scripts": {
     "build": "tsup src/index.ts --format esm --dts --clean",
-    "dev": "tsx --conditions=development src/index.ts",
-    "test": "vitest run --passWithNoTests",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@arb/audit": "workspace:*",
-    "@arb/schemas": "workspace:*",
-    "commander": "^12.1.0"
+    "@arb/browser-driver": "workspace:*",
+    "@arb/core": "workspace:*",
+    "@arb/schemas": "workspace:*"
   }
 }

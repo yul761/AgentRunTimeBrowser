@@ -5,6 +5,7 @@ import {
   computeStateDelta,
   createLogEntry,
   normalizeRuntimeError,
+  profileStructuredState,
   type PreviewSnapshot,
   type TaskRecord,
   type TaskStore
@@ -12,7 +13,9 @@ import {
 import {
   TaskSubmissionSchema,
   type StepEvidence,
+  type StateObservationProfile,
   type StructuredState,
+  type TaskRuntimeOptions,
   type TaskStep,
   type TaskSubmission
 } from "@arb/schemas";
@@ -22,6 +25,16 @@ export interface SubmitTaskOptions {
 }
 
 export type BrowserDriverFactory = () => BrowserDriver;
+
+interface ResolvedRuntimeOptions {
+  capturePreview: boolean;
+  captureEvidence: boolean;
+  observationProfile: StateObservationProfile;
+}
+
+interface StepExecutionResult {
+  state: StructuredState | null;
+}
 
 export class TaskEngine {
   constructor(
@@ -50,13 +63,15 @@ export class TaskEngine {
       totalSteps: steps.length
     });
 
+    const runtimeOptions = resolveRuntimeOptions(parsed.data.runtime);
+
     if (options.async === false) {
-      await this.executeTask(taskId, steps);
+      await this.executeTask(taskId, steps, runtimeOptions);
       return this.store.getTask(taskId) ?? record;
     }
 
     queueMicrotask(() => {
-      this.executeTask(taskId, steps).catch((error) => {
+      this.executeTask(taskId, steps, runtimeOptions).catch((error) => {
         const normalized = normalizeRuntimeError(error);
         this.store.updateTask(taskId, {
           status: "failed",
@@ -70,7 +85,7 @@ export class TaskEngine {
     return record;
   }
 
-  private async executeTask(taskId: string, steps: TaskStep[]): Promise<void> {
+  private async executeTask(taskId: string, steps: TaskStep[], runtimeOptions: ResolvedRuntimeOptions): Promise<void> {
     const driver = this.driverFactory();
     const extractedData: Record<string, unknown> = {};
     let state: StructuredState | null = null;
@@ -87,17 +102,20 @@ export class TaskEngine {
         try {
           const beforeState = state;
           const beforeDriverLogCount = driver.getLogs().length;
-          await this.executeStep(driver, step, extractedData);
-          state = await driver.getStructuredState();
-          previewSnapshot = await driver.getPreviewSnapshot();
-          const evidence = createStepEvidence({
-            taskId,
-            step,
-            index,
-            beforeState,
-            afterState: state,
-            driverLogs: driver.getLogs().slice(beforeDriverLogCount)
-          });
+          const stepResult = await this.executeStep(driver, step, extractedData);
+          const fullState = stepResult.state ?? (await driver.getStructuredState());
+          state = profileStructuredState(fullState, runtimeOptions.observationProfile) ?? fullState;
+          previewSnapshot = runtimeOptions.capturePreview ? await driver.getPreviewSnapshot() : previewSnapshot;
+          const evidence = runtimeOptions.captureEvidence
+            ? createStepEvidence({
+                taskId,
+                step,
+                index,
+                beforeState,
+                afterState: state,
+                driverLogs: driver.getLogs().slice(beforeDriverLogCount)
+              })
+            : null;
           this.store.updateTask(taskId, {
             completedSteps: index + 1,
             finalUrl: state.url,
@@ -106,11 +124,13 @@ export class TaskEngine {
             previewSnapshot,
             extractedData: { ...extractedData }
           });
-          this.store.appendEvidence(taskId, evidence);
+          if (evidence) {
+            this.store.appendEvidence(taskId, evidence);
+          }
           this.appendLog(taskId, `Completed step ${index + 1}/${steps.length}: ${step.action}`, index, step.action, {
             url: state.url,
             title: state.title,
-            evidenceStepId: evidence.stepId
+            evidenceStepId: evidence?.stepId
           });
         } catch (error) {
           const normalized = normalizeRuntimeError(
@@ -155,46 +175,46 @@ export class TaskEngine {
     driver: BrowserDriver,
     step: TaskStep,
     extractedData: Record<string, unknown>
-  ): Promise<void> {
+  ): Promise<StepExecutionResult> {
     switch (step.action) {
       case "navigate":
         await driver.openPage(step.url, {
           waitUntil: step.waitUntil,
           timeoutMs: step.timeoutMs
         });
-        return;
+        return { state: null };
       case "click":
         await driver.click(step.target, step.timeoutMs);
-        return;
+        return { state: null };
       case "fill":
         await driver.fill(step.target, step.value, step.timeoutMs);
-        return;
+        return { state: null };
       case "press":
         await driver.press(step.key, step.target, step.timeoutMs);
-        return;
+        return { state: null };
       case "waitFor":
         await driver.waitFor(step.condition, step.timeoutMs);
-        return;
+        return { state: null };
       case "assert":
         await driver.assert(step.condition, step.timeoutMs);
-        return;
+        return { state: null };
       case "extract": {
         const key = step.extract.name ?? `${step.extract.kind}-${Object.keys(extractedData).length + 1}`;
         if (step.extract.kind === "text") {
           extractedData[key] = await driver.extractText(step.extract.target);
-          return;
+          return { state: null };
         }
         const state = await driver.getStructuredState();
         if (step.extract.kind === "headings") {
           extractedData[key] = state.headings;
-          return;
+          return { state };
         }
         if (step.extract.kind === "links") {
           extractedData[key] = state.links;
-          return;
+          return { state };
         }
         extractedData[key] = state;
-        return;
+        return { state };
       }
     }
   }
@@ -238,6 +258,14 @@ export class TaskEngine {
       })
     );
   }
+}
+
+function resolveRuntimeOptions(options: TaskRuntimeOptions | undefined): ResolvedRuntimeOptions {
+  return {
+    capturePreview: options?.capturePreview ?? true,
+    captureEvidence: options?.captureEvidence ?? true,
+    observationProfile: options?.observationProfile ?? "full"
+  };
 }
 
 export function planSteps(submission: TaskSubmission): TaskStep[] {

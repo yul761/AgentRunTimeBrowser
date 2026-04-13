@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 import { spawn, type ChildProcess } from "node:child_process";
-import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+import { auditUrl, type AuditOptions } from "@arb/audit";
+import type { AuditIssue, AuditReport, AuditTaskProbe } from "@arb/schemas";
 import { Command } from "commander";
 
 const defaultApiUrl = process.env.ARB_API_URL ?? "http://localhost:8787";
@@ -135,10 +138,57 @@ program
     }
   });
 
+program
+  .command("audit")
+  .description("Audit whether a page is ready for structured AI agent use")
+  .argument("<url-or-path>", "URL or local HTML file path to audit")
+  .option("--task <tasks>", "Comma-separated task probes: page,search", "page")
+  .option("--query <query>", "Search probe query", "Richmond ramen")
+  .option("--out <path>", "Write the full JSON audit report to a file")
+  .option("--json", "Print the full JSON audit report")
+  .option("--fail-below <score>", "Exit non-zero if the overall score is below this value")
+  .action(async (urlOrPath: string, options: AuditCommandOptions) => {
+    const report = await auditUrl(normalizeAuditUrl(urlOrPath), {
+      tasks: parseAuditTasks(options.task),
+      searchQuery: options.query
+    });
+
+    if (options.out) {
+      const outputPath = resolve(process.cwd(), options.out);
+      await mkdir(dirname(outputPath), { recursive: true });
+      await writeFile(outputPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
+      console.log(`Saved audit report: ${outputPath}`);
+    }
+
+    if (options.json) {
+      console.log(JSON.stringify(report, null, 2));
+    } else {
+      printAuditReport(report);
+    }
+
+    if (options.failBelow !== undefined) {
+      const threshold = Number.parseInt(options.failBelow, 10);
+      if (Number.isNaN(threshold)) {
+        throw new Error(`Invalid --fail-below score: ${options.failBelow}`);
+      }
+      if (report.scores.overall < threshold) {
+        process.exitCode = 1;
+      }
+    }
+  });
+
 program.parseAsync(process.argv).catch((error) => {
   console.error(error instanceof Error ? error.message : String(error));
   process.exitCode = 1;
 });
+
+interface AuditCommandOptions {
+  task: string;
+  query: string;
+  out?: string;
+  json?: boolean;
+  failBelow?: string;
+}
 
 async function apiRequest(path: string, init?: RequestInit): Promise<any> {
   const options = program.opts<{ apiUrl: string }>();
@@ -160,4 +210,88 @@ function shortDate(value: string | null | undefined): string {
     return "";
   }
   return new Date(value).toLocaleString();
+}
+
+function normalizeAuditUrl(value: string): string {
+  try {
+    return new URL(value).href;
+  } catch {
+    return pathToFileURL(resolve(process.cwd(), value)).href;
+  }
+}
+
+function parseAuditTasks(value: string): NonNullable<AuditOptions["tasks"]> {
+  const tasks = value
+    .split(",")
+    .map((task) => task.trim())
+    .filter(Boolean);
+  const invalid = tasks.filter((task) => task !== "page" && task !== "search");
+  if (invalid.length > 0) {
+    throw new Error(`Unsupported audit task probe: ${invalid.join(", ")}`);
+  }
+  return tasks as NonNullable<AuditOptions["tasks"]>;
+}
+
+function printAuditReport(report: AuditReport): void {
+  console.log(`Agentability audit for ${report.finalUrl}`);
+  console.log(`Title: ${report.title || "not available"}`);
+  console.log(`Overall score: ${report.scores.overall}/100`);
+  console.table({
+    semantic: report.scores.semanticDiscoverability,
+    actionability: report.scores.actionability,
+    feedback: report.scores.stateFeedback,
+    recoverability: report.scores.recoverability,
+    safety: report.scores.agentSafety
+  });
+
+  printTaskProbes(report.taskProbes);
+  printIssues(report.issues);
+}
+
+function printTaskProbes(probes: AuditTaskProbe[]): void {
+  console.log("");
+  console.log("Task probes:");
+  if (probes.length === 0) {
+    console.log("- none");
+    return;
+  }
+  for (const probe of probes) {
+    const effects = probe.observedEffects.length > 0 ? ` effects=${probe.observedEffects.join(",")}` : "";
+    const error = probe.error ? ` error=${probe.error}` : "";
+    console.log(`- ${probe.task}: ${probe.status} steps=${probe.steps}${effects}${error}`);
+  }
+}
+
+function printIssues(issues: AuditIssue[]): void {
+  console.log("");
+  console.log("Issues:");
+  if (issues.length === 0) {
+    console.log("- none");
+    return;
+  }
+
+  for (const issue of [...issues].sort(compareIssues)) {
+    console.log(`- [${issue.severity}] ${issue.category}: ${issue.title}`);
+    console.log(`  ${issue.message}`);
+    if (issue.recommendation) {
+      console.log(`  Fix: ${issue.recommendation}`);
+    }
+  }
+}
+
+function compareIssues(left: AuditIssue, right: AuditIssue): number {
+  return severityRank(right.severity) - severityRank(left.severity);
+}
+
+function severityRank(severity: AuditIssue["severity"]): number {
+  switch (severity) {
+    case "high":
+      return 4;
+    case "medium":
+      return 3;
+    case "low":
+      return 2;
+    case "info":
+      return 1;
+  }
 }

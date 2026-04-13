@@ -16,6 +16,7 @@ class MockDriver implements BrowserDriver {
   readonly pageId = "page-1";
   readonly calls: string[] = [];
   failOnClick = false;
+  snapshotCalls = 0;
 
   async openPage(url: string): Promise<void> {
     this.calls.push(`navigate:${url}`);
@@ -102,6 +103,7 @@ class MockDriver implements BrowserDriver {
   }
 
   async getPreviewSnapshot(): Promise<PreviewSnapshot | null> {
+    this.snapshotCalls += 1;
     return null;
   }
 
@@ -137,6 +139,34 @@ describe("task engine", () => {
     expect(record.evidence[0]?.afterStateId).toMatch(/^state-/);
     expect(record.logs.some((log) => log.message.includes("Completed step 3"))).toBe(true);
     expect(driver.calls).toContain("fill:ramen");
+  });
+
+  it("supports lean runtime execution without preview or evidence capture", async () => {
+    const store = new InMemoryTaskStore();
+    const driver = new MockDriver();
+    const engine = new TaskEngine(store, () => driver);
+
+    const record = await engine.submitTask(
+      {
+        taskType: "workflow.execute",
+        runtime: {
+          capturePreview: false,
+          captureEvidence: false
+        },
+        input: {
+          steps: [
+            { action: "navigate", url: "https://example.com" },
+            { action: "extract", extract: { kind: "links", name: "links" } }
+          ]
+        }
+      },
+      { async: false }
+    );
+
+    expect(record.status).toBe("success");
+    expect(record.evidence).toHaveLength(0);
+    expect(record.previewSnapshot).toBeNull();
+    expect(driver.snapshotCalls).toBe(0);
   });
 
   it("translates web.search into deterministic workflow steps", () => {
