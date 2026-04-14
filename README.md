@@ -343,11 +343,4 @@ Task submissions can include optional runtime execution settings:
 
 ## Recommended v2
 
-- Make CDP Accessibility tree / Playwright AI snapshot the primary observation backend, with DOM semantic extraction as fallback.
-- Add an interactive report viewer for product and frontend teams.
-- Add a GitHub Action for preview-environment regression checks.
-- Add more deterministic probes: auth form, checkout-like form, modal dialog, filtering, pagination, and destructive action confirmation.
-- Add richer issue rules for tables, menus, dialogs, ARIA landmarks, sponsored content, and prompt-injection-like page text.
-- Add replay artifacts with deterministic step inputs, state deltas, and network summaries.
-- Replace the in-memory task store with SQLite or Postgres when reports need persistence.
-- Add typed SDK clients for teams embedding audit checks into their own agent platforms.
+The full required work plan for turning the audit package into a mature npm package is tracked in [docs/audit-package-plan.md](docs/audit-package-plan.md). It covers audit coverage, task probes, rule depth, runtime evidence, configuration, CI outputs, Node API ergonomics, CLI commands, documentation, and publishing checks.
