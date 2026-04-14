@@ -127,6 +127,73 @@ export function formatHtmlReport(report: AuditReport): string {
 `;
 }
 
+export function formatSarifReport(report: AuditReport): string {
+  const rulesById = new Map(report.issues.map((issue) => [issue.ruleId, issue]));
+  return `${JSON.stringify(
+    {
+      version: "2.1.0",
+      $schema: "https://json.schemastore.org/sarif-2.1.0.json",
+      runs: [
+        {
+          tool: {
+            driver: {
+              name: "agentability-audit",
+              informationUri: "https://github.com/yul761/AgentRunTimeBrowser",
+              rules: [...rulesById.values()].map((issue) => ({
+                id: issue.ruleId,
+                name: issue.title,
+                shortDescription: { text: issue.title },
+                fullDescription: { text: issue.message },
+                help: { text: issue.recommendation ?? issue.message, markdown: issue.recommendation ?? issue.message },
+                defaultConfiguration: { level: sarifLevel(issue.severity) }
+              }))
+            }
+          },
+          results: report.issues.map((issue) => ({
+            ruleId: issue.ruleId,
+            level: sarifLevel(issue.severity),
+            message: { text: `${issue.title}: ${issue.message}` },
+            locations: [
+              {
+                physicalLocation: {
+                  artifactLocation: { uri: report.finalUrl }
+                }
+              }
+            ],
+            properties: {
+              category: issue.category,
+              recommendation: issue.recommendation,
+              evidence: issue.evidence
+            }
+          }))
+        }
+      ]
+    },
+    null,
+    2
+  )}\n`;
+}
+
+export function formatJunitReport(report: AuditReport): string {
+  const highIssues = report.issues.filter((issue) => issue.severity === "high");
+  const testcase = report.issues.length
+    ? report.issues
+        .map((issue) => {
+          const body = issue.severity === "high"
+            ? `<failure message="${escapeXml(issue.title)}">${escapeXml(issue.message)}</failure>`
+            : `<system-out>${escapeXml(issue.message)}</system-out>`;
+          return `    <testcase classname="agentability.${escapeXml(issue.category)}" name="${escapeXml(issue.ruleId)}">\n      ${body}\n    </testcase>`;
+        })
+        .join("\n")
+    : `    <testcase classname="agentability" name="no-issues" />`;
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="agentability-audit" tests="${Math.max(1, report.issues.length)}" failures="${highIssues.length}" errors="0">
+${testcase}
+</testsuite>
+`;
+}
+
 function formatProbeLines(report: AuditReport): string[] {
   if (report.taskProbes.length === 0) {
     return ["- none"];
@@ -166,6 +233,18 @@ function severityRank(severity: AuditSeverity): number {
   }
 }
 
+function sarifLevel(severity: AuditSeverity): "error" | "warning" | "note" {
+  switch (severity) {
+    case "high":
+      return "error";
+    case "medium":
+    case "low":
+      return "warning";
+    case "info":
+      return "note";
+  }
+}
+
 function escapeMarkdownTable(value: string): string {
   return value.replace(/\|/g, "\\|").replace(/\n/g, " ");
 }
@@ -176,4 +255,8 @@ function escapeHtml(value: string): string {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+function escapeXml(value: string): string {
+  return escapeHtml(value).replace(/'/g, "&apos;");
 }

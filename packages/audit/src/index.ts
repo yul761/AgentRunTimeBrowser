@@ -1,11 +1,24 @@
-import { PlaywrightBrowserDriver, buildStructuredStateFromDocument } from "@arb/browser-driver";
+import { buildStructuredStateFromDocument } from "@arb/browser-driver";
 import { computeStateDelta } from "@arb/core";
 import { chromium, type Page } from "playwright";
+import { getRule, listRules, type RuleMetadata } from "./rules";
 
 export { loadAuditConfig } from "./config";
-export { formatHtmlReport, formatMarkdownReport, formatTextReport } from "./reporters";
+export { formatHtmlReport, formatJunitReport, formatMarkdownReport, formatSarifReport, formatTextReport } from "./reporters";
+export { getRule, listRules, type RuleMetadata } from "./rules";
 
-export type AuditTask = "page" | "search";
+export type AuditTask =
+  | "page"
+  | "search"
+  | "auth_form"
+  | "form"
+  | "form_validation"
+  | "modal"
+  | "menu"
+  | "filter"
+  | "pagination"
+  | "download"
+  | "table";
 export type AuditSeverity = "info" | "low" | "medium" | "high";
 export type AuditCategory =
   | "semantic_discoverability"
@@ -13,6 +26,14 @@ export type AuditCategory =
   | "state_feedback"
   | "recoverability"
   | "agent_safety";
+export type ObservationBackend = "auto" | "cdp_ax_tree" | "playwright_aria" | "dom_semantic";
+
+export type RuleSeverityOverride = AuditSeverity | "off";
+
+export interface RuleConfig {
+  severity?: Record<string, RuleSeverityOverride>;
+  suppress?: Array<string | { ruleId: string; reason?: string }>;
+}
 
 export interface AuditOptions {
   tasks?: AuditTask[];
@@ -20,15 +41,34 @@ export interface AuditOptions {
   timeoutMs?: number;
   redact?: Array<string | RegExp>;
   maxTextLength?: number;
+  observationBackend?: ObservationBackend;
+  rules?: RuleConfig;
+  artifactDir?: string;
+  headers?: Record<string, string>;
+  storageState?: string;
+  viewport?: {
+    width: number;
+    height: number;
+  };
 }
 
 export interface AuditConfig extends AuditOptions {
+  targets?: AuditTargetConfig[];
   failBelow?: number;
   output?: {
     json?: string;
     html?: string;
     markdown?: string;
+    sarif?: string;
+    junit?: string;
   };
+}
+
+export interface AuditTargetConfig extends AuditOptions {
+  name?: string;
+  url: string;
+  failBelow?: number;
+  output?: AuditConfig["output"];
 }
 
 export interface AuditIssue {
@@ -174,9 +214,24 @@ export interface AuditReport {
   state: StructuredState;
   metadata: {
     packageName: "agentability-audit";
-    reportVersion: "0.1";
-    observationBackend: "dom_semantic";
+    reportVersion: "0.2";
+    scoreModelVersion: "0.2";
+    observationBackend: ObservationBackend;
+    requestedObservationBackend: ObservationBackend;
+    fallbackChain: ObservationBackend[];
     localOnly: true;
+    artifactDir?: string;
+  };
+}
+
+export interface AuditProjectResult {
+  generatedAt: string;
+  reports: AuditReport[];
+  summary: {
+    targets: number;
+    passed: number;
+    failed: number;
+    averageScore: number;
   };
 }
 
@@ -211,14 +266,21 @@ interface InternalIssueInput {
   recommendation?: string;
 }
 
+type NormalizedAuditOptions = Required<
+  Pick<AuditOptions, "tasks" | "searchQuery" | "timeoutMs" | "redact" | "maxTextLength" | "observationBackend" | "rules">
+> & Pick<AuditOptions, "artifactDir">;
+
 export class AgentabilityAuditor {
-  private readonly driverFactory: BrowserDriverFactory;
+  private readonly driverFactory?: BrowserDriverFactory;
 
   constructor(options: AgentabilityAuditorOptions = {}) {
-    this.driverFactory = options.driverFactory ?? (() => new PlaywrightBrowserDriver());
+    this.driverFactory = options.driverFactory;
   }
 
   async auditUrl(url: string, options: AuditOptions = {}): Promise<AuditReport> {
+    if (!this.driverFactory) {
+      return auditUrlWithOwnedPage(url, options);
+    }
     const driver = this.driverFactory();
     try {
       await driver.openPage(url, { waitUntil: "domcontentloaded", timeoutMs: options.timeoutMs ?? 30000 });
@@ -234,12 +296,7 @@ export async function auditUrl(url: string, options: AuditOptions = {}): Promise
 }
 
 export async function auditHtml(html: string, options: AuditOptions = {}): Promise<AuditReport> {
-  const browser = await chromium.launch({
-    headless: process.env.ARB_HEADLESS !== "false"
-  });
-  const context = await browser.newContext({
-    viewport: { width: 1280, height: 900 }
-  });
+  const { browser, context } = await createAuditBrowserContext(options);
   const page = await context.newPage();
   try {
     await page.setContent(html, {
@@ -253,58 +310,106 @@ export async function auditHtml(html: string, options: AuditOptions = {}): Promi
   }
 }
 
+async function auditUrlWithOwnedPage(url: string, options: AuditOptions): Promise<AuditReport> {
+  const { browser, context } = await createAuditBrowserContext(options);
+  const page = await context.newPage();
+  try {
+    const driver = new PlaywrightPageAuditDriver(page);
+    await driver.openPage(url, { waitUntil: "domcontentloaded", timeoutMs: options.timeoutMs ?? 30000 });
+    return await auditDriver(driver, url, options);
+  } finally {
+    await context.close().catch(() => undefined);
+    await browser.close().catch(() => undefined);
+  }
+}
+
+async function createAuditBrowserContext(options: AuditOptions) {
+  const browser = await chromium.launch({
+    headless: process.env.ARB_HEADLESS !== "false"
+  });
+  const context = await browser.newContext({
+    viewport: options.viewport ?? { width: 1280, height: 900 },
+    extraHTTPHeaders: options.headers,
+    storageState: options.storageState
+  });
+  return { browser, context };
+}
+
 export async function auditPage(page: Page, options: AuditOptions = {}): Promise<AuditReport> {
   const driver = new PlaywrightPageAuditDriver(page);
   return auditDriver(driver, page.url(), options);
 }
 
-export function normalizeAuditOptions(options: AuditOptions = {}): Required<Pick<AuditOptions, "tasks" | "searchQuery" | "timeoutMs" | "redact" | "maxTextLength">> {
+export function defineConfig(config: AuditConfig): AuditConfig {
+  validateAuditConfig(config);
+  return config;
+}
+
+export async function auditProject(config: AuditConfig): Promise<AuditProjectResult> {
+  validateAuditConfig(config);
+  const targets = config.targets ?? [];
+  if (targets.length === 0) {
+    throw new Error("auditProject requires at least one target URL.");
+  }
+
+  const reports: AuditReport[] = [];
+  for (const target of targets) {
+    const { output: _output, failBelow: _failBelow, name: _name, ...targetOptions } = target;
+    reports.push(await auditUrl(target.url, { ...config, ...targetOptions }));
+  }
+
+  const failed = reports.filter((report) => report.issues.some((issueItem) => issueItem.severity === "high")).length;
+  const averageScore = reports.length
+    ? Math.round(reports.reduce((total, report) => total + report.scores.overall, 0) / reports.length)
+    : 0;
+  return {
+    generatedAt: new Date().toISOString(),
+    reports,
+    summary: {
+      targets: reports.length,
+      passed: reports.length - failed,
+      failed,
+      averageScore
+    }
+  };
+}
+
+export function normalizeAuditOptions(options: AuditOptions = {}): NormalizedAuditOptions {
   const timeoutMs = options.timeoutMs ?? 30000;
   const maxTextLength = options.maxTextLength ?? 12000;
+  const rules = options.rules ?? {};
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
     throw new Error(`Invalid timeoutMs: ${options.timeoutMs}`);
   }
   if (!Number.isFinite(maxTextLength) || maxTextLength <= 0) {
     throw new Error(`Invalid maxTextLength: ${options.maxTextLength}`);
   }
+  validateRuleConfig(rules);
   return {
     tasks: normalizeAuditTasks(options.tasks),
     searchQuery: options.searchQuery ?? "Richmond ramen",
     timeoutMs,
     redact: options.redact ?? defaultRedactions(),
-    maxTextLength
+    maxTextLength,
+    observationBackend: normalizeObservationBackend(options.observationBackend),
+    rules,
+    artifactDir: options.artifactDir
   };
 }
 
 async function auditDriver(driver: AuditBrowserDriver, url: string, options: AuditOptions): Promise<AuditReport> {
   const normalized = normalizeAuditOptions(options);
   const taskProbes: AuditTaskProbe[] = [];
+  const selectedBackend = selectedObservationBackend(normalized.observationBackend);
   const initialRawState = await driver.getStructuredState();
   const initialState = redactState(initialRawState, normalized);
 
   for (const task of normalized.tasks) {
-    if (task === "page") {
-      taskProbes.push({
-        task,
-        status: "passed",
-        steps: 1,
-        observedEffects: ["structured_state_captured"],
-        error: null,
-        evidence: {
-          actions: initialState.actionGraph.actions.length,
-          inputs: initialState.inputs.length,
-          links: initialState.links.length
-        }
-      });
-    }
-
-    if (task === "search") {
-      taskProbes.push(await runSearchProbe(driver, initialRawState, normalized.searchQuery, normalized));
-    }
+    taskProbes.push(await runTaskProbe(task, driver, initialRawState, normalized));
   }
 
   const finalState = redactState(await driver.getStructuredState(), normalized);
-  const issues = buildIssues(finalState, taskProbes);
+  const issues = applyRuleConfig(buildIssues(finalState, taskProbes), normalized.rules);
 
   return {
     reportId: crypto.randomUUID(),
@@ -318,9 +423,115 @@ async function auditDriver(driver: AuditBrowserDriver, url: string, options: Aud
     state: finalState,
     metadata: {
       packageName: "agentability-audit",
-      reportVersion: "0.1",
-      observationBackend: "dom_semantic",
-      localOnly: true
+      reportVersion: "0.2",
+      scoreModelVersion: "0.2",
+      observationBackend: selectedBackend,
+      requestedObservationBackend: normalized.observationBackend,
+      fallbackChain: fallbackChainFor(normalized.observationBackend),
+      localOnly: true,
+      artifactDir: normalized.artifactDir
+    }
+  };
+}
+
+async function runTaskProbe(
+  task: AuditTask,
+  driver: AuditBrowserDriver,
+  state: StructuredState,
+  options: NormalizedAuditOptions
+): Promise<AuditTaskProbe> {
+  switch (task) {
+    case "page":
+      return runPageProbe(state);
+    case "search":
+      return runSearchProbe(driver, state, options.searchQuery, options);
+    case "auth_form":
+      return runHeuristicProbe(task, state, {
+        matched: hasAuthForm(state),
+        effects: ["auth_form_detected"],
+        skipped: "No auth-like form was found in structured state."
+      });
+    case "form":
+      return runHeuristicProbe(task, state, {
+        matched: state.forms.length > 0,
+        effects: ["form_detected"],
+        skipped: "No semantic form was found in structured state."
+      });
+    case "form_validation":
+      return runHeuristicProbe(task, state, {
+        matched: hasFormValidationSignal(state),
+        effects: ["validation_feedback_detected"],
+        skipped: "No validation feedback, required-state hint, or error text was found."
+      });
+    case "modal":
+      return runHeuristicProbe(task, state, {
+        matched: state.regions.some((region) => region.kind === "modal_dialog"),
+        effects: ["modal_dialog_detected"],
+        skipped: "No modal dialog region was found."
+      });
+    case "menu":
+      return runHeuristicProbe(task, state, {
+        matched: hasActionLabel(state, /menu|navigation|nav/i) || state.regions.some((region) => region.kind === "navigation_bar"),
+        effects: ["menu_or_navigation_detected"],
+        skipped: "No menu-like or navigation action was found."
+      });
+    case "filter":
+      return runHeuristicProbe(task, state, {
+        matched: hasActionLabel(state, /filter|sort|refine/i) || state.visibleTextSummary.some((line) => /filter|sort|refine/i.test(line)),
+        effects: ["filter_or_sort_detected"],
+        skipped: "No filter or sort affordance was found."
+      });
+    case "pagination":
+      return runHeuristicProbe(task, state, {
+        matched: hasActionLabel(state, /next|previous|prev|page \d+/i) || state.links.some((link) => /next|previous|prev|page \d+/i.test(link.name)),
+        effects: ["pagination_detected"],
+        skipped: "No pagination affordance was found."
+      });
+    case "download":
+      return runHeuristicProbe(task, state, {
+        matched: state.actionGraph.actions.some((action) => action.kind === "download"),
+        effects: ["download_action_detected"],
+        skipped: "No safe download action was found."
+      });
+    case "table":
+      return runHeuristicProbe(task, state, {
+        matched: state.visibleTextSummary.some((line) => /table|row|column|sort by/i.test(line)),
+        effects: ["table_like_context_detected"],
+        skipped: "No table-like structured context was found."
+      });
+  }
+}
+
+function runPageProbe(state: StructuredState): AuditTaskProbe {
+  return {
+    task: "page",
+    status: "passed",
+    steps: 1,
+    observedEffects: ["structured_state_captured"],
+    error: null,
+    evidence: {
+      actions: state.actionGraph.actions.length,
+      inputs: state.inputs.length,
+      links: state.links.length
+    }
+  };
+}
+
+function runHeuristicProbe(
+  task: AuditTask,
+  state: StructuredState,
+  input: { matched: boolean; effects: string[]; skipped: string }
+): AuditTaskProbe {
+  return {
+    task,
+    status: input.matched ? "passed" : "skipped",
+    steps: 1,
+    observedEffects: input.matched ? input.effects : [],
+    error: input.matched ? null : input.skipped,
+    evidence: {
+      actions: state.actionGraph.actions.length,
+      forms: state.forms.length,
+      regions: state.regions.map((region) => region.kind)
     }
   };
 }
@@ -329,7 +540,7 @@ async function runSearchProbe(
   driver: AuditBrowserDriver,
   beforeState: StructuredState,
   query: string,
-  options: Required<Pick<AuditOptions, "tasks" | "searchQuery" | "timeoutMs" | "redact" | "maxTextLength">>
+  options: NormalizedAuditOptions
 ): Promise<AuditTaskProbe> {
   const input = findSearchInput(beforeState);
   if (!input) {
@@ -393,6 +604,15 @@ function buildIssues(state: StructuredState, taskProbes: AuditTaskProbe[]): Audi
   const duplicateActionLabels = duplicateLabels(
     state.actionGraph.actions.map((action) => `${action.kind}:${action.label ?? ""}`).filter((value) => !value.endsWith(":"))
   );
+  const duplicateFingerprints = duplicateLabels([
+    ...state.buttons,
+    ...state.inputs,
+    ...state.links,
+    ...state.headings,
+    ...state.forms
+  ].map((element) => element.locatorFingerprint));
+  const actionsMissingTarget = state.actionGraph.actions.filter((action) => !action.targetElementId);
+  const lowConfidenceActions = state.actionGraph.actions.filter((action) => (action.confidence ?? 1) < 0.65);
   const issues: AuditIssue[] = [];
 
   if (inputsMissingLabels.length > 0) {
@@ -471,6 +691,39 @@ function buildIssues(state: StructuredState, taskProbes: AuditTaskProbe[]): Audi
     }));
   }
 
+  if (actionsMissingTarget.length > 0) {
+    issues.push(issue("action-missing-target", {
+      severity: "medium",
+      category: "actionability",
+      title: "Action graph actions need target identity",
+      message: `${actionsMissingTarget.length} action(s) do not include a target semantic element ID.`,
+      evidence: { actions: actionsMissingTarget.map((action) => action.actionId) },
+      recommendation: "Ensure inferred actions are attached to stable semantic elements."
+    }));
+  }
+
+  if (lowConfidenceActions.length > 0) {
+    issues.push(issue("low-confidence-actions", {
+      severity: "low",
+      category: "actionability",
+      title: "Low-confidence actions need stronger semantics",
+      message: `${lowConfidenceActions.length} action(s) were inferred with low confidence.`,
+      evidence: { actions: lowConfidenceActions.map((action) => ({ actionId: action.actionId, label: action.label, confidence: action.confidence })) },
+      recommendation: "Use semantic controls, stable labels, and explicit roles for interactive elements."
+    }));
+  }
+
+  if (duplicateFingerprints.length > 0) {
+    issues.push(issue("duplicate-locator-fingerprints", {
+      severity: "medium",
+      category: "recoverability",
+      title: "Locator fingerprints should be stable and unique",
+      message: "Multiple exposed elements share the same locator fingerprint.",
+      evidence: { duplicates: duplicateFingerprints },
+      recommendation: "Prefer stable IDs, data-testid values, names, or unique labels for repeated controls."
+    }));
+  }
+
   if (!state.regions.some((region) => region.kind === "primary_content")) {
     issues.push(issue("missing-primary-content-region", {
       severity: "medium",
@@ -478,6 +731,16 @@ function buildIssues(state: StructuredState, taskProbes: AuditTaskProbe[]): Audi
       title: "Primary content region was not detected",
       message: "Agents get better context when the main content area is explicit.",
       recommendation: "Use a main element or role=\"main\" around the page's primary task area."
+    }));
+  }
+
+  if (state.headings.length === 0) {
+    issues.push(issue("missing-heading-context", {
+      severity: "low",
+      category: "semantic_discoverability",
+      title: "Pages should expose heading context",
+      message: "No visible headings were detected in structured state.",
+      recommendation: "Expose a meaningful h1 and section headings."
     }));
   }
 
@@ -494,6 +757,33 @@ function buildIssues(state: StructuredState, taskProbes: AuditTaskProbe[]): Audi
     }));
   }
 
+  if (taskProbes.some((probe) => probe.status === "skipped")) {
+    issues.push(issue("task-probe-skipped", {
+      severity: "info",
+      category: "state_feedback",
+      title: "A configured task probe was skipped",
+      message: "At least one configured probe did not find the expected structured affordance.",
+      evidence: {
+        skipped: taskProbes.filter((probe) => probe.status === "skipped").map((probe) => ({ task: probe.task, error: probe.error }))
+      },
+      recommendation: "Only enable probes that match the page, or expose the expected form, dialog, list, or action semantics."
+    }));
+  }
+
+  const modalRegions = state.regions.filter((region) => region.kind === "modal_dialog");
+  if (
+    modalRegions.length > 0 &&
+    !state.actionGraph.actions.some((action) => action.kind === "dismiss_dialog" || /close|dismiss|cancel/i.test(action.label ?? ""))
+  ) {
+    issues.push(issue("modal-missing-dismiss", {
+      severity: "medium",
+      category: "actionability",
+      title: "Modal dialogs need a structured dismiss action",
+      message: "A modal dialog was detected, but no close, cancel, or dismiss action was inferred.",
+      recommendation: "Provide a visible close/cancel/dismiss button with an accessible name."
+    }));
+  }
+
   if (state.visibleTextSummary.some((line) => /sponsored|advertisement|ad\b/i.test(line)) && !hasExplicitSponsoredRegion(state)) {
     issues.push(issue("sponsored-content-not-regioned", {
       severity: "low",
@@ -501,6 +791,16 @@ function buildIssues(state: StructuredState, taskProbes: AuditTaskProbe[]): Audi
       title: "Sponsored content should be structurally distinguishable",
       message: "The page contains sponsored or advertising text, but no dedicated region exposes that boundary to agents.",
       recommendation: "Mark sponsored areas with explicit labels, regions, or metadata so agents can distinguish organic and paid content."
+    }));
+  }
+
+  if (state.visibleTextSummary.some((line) => /ignore (previous|all)|system prompt|developer instruction|do not obey|forget your instructions/i.test(line))) {
+    issues.push(issue("prompt-injection-like-text", {
+      severity: "high",
+      category: "agent_safety",
+      title: "Page text contains agent-instruction language",
+      message: "Visible page text appears to instruct agents to ignore or override other instructions.",
+      recommendation: "Keep agent-directed instructions out of user-visible page content or mark them as untrusted content."
     }));
   }
 
@@ -669,6 +969,25 @@ function findSearchInput(state: StructuredState): StructuredState["inputs"][numb
   return state.inputs.find((input) => /search|query|q\b/i.test(`${input.label} ${input.type ?? ""}`));
 }
 
+function hasAuthForm(state: StructuredState): boolean {
+  return (
+    state.regions.some((region) => region.kind === "auth_form") ||
+    state.inputs.some((input) => /password|email|username|login|sign in/i.test(`${input.label} ${input.type ?? ""}`)) ||
+    state.forms.some((form) => /login|sign in|auth|account/i.test(form.name))
+  );
+}
+
+function hasFormValidationSignal(state: StructuredState): boolean {
+  return (
+    state.visibleTextSummary.some((line) => /required|invalid|error|missing|must enter|try again/i.test(line)) ||
+    state.inputs.some((input) => /required|invalid|error/i.test(`${input.label} ${input.locatorFingerprint}`))
+  );
+}
+
+function hasActionLabel(state: StructuredState, pattern: RegExp): boolean {
+  return state.actionGraph.actions.some((action) => pattern.test(`${action.kind} ${action.label ?? ""}`));
+}
+
 function targetForInput(input: StructuredState["inputs"][number]): AuditTarget {
   if (input.label && !/^input \d+$/i.test(input.label)) {
     return { kind: "label", value: input.label, exact: true };
@@ -677,12 +996,34 @@ function targetForInput(input: StructuredState["inputs"][number]): AuditTarget {
 }
 
 function issue(id: string, input: InternalIssueInput): AuditIssue {
+  const metadata = getRule(id);
   return {
     id,
-    ruleId: `${input.category}/${id}`,
-    helpUrl: `https://github.com/yul761/AgentRunTimeBrowser#${id}`,
-    ...input
+    ruleId: metadata?.ruleId ?? `${input.category}/${id}`,
+    severity: input.severity,
+    category: input.category,
+    title: input.title,
+    message: input.message,
+    evidence: input.evidence,
+    recommendation: input.recommendation ?? metadata?.recommendation,
+    helpUrl: `https://github.com/yul761/AgentRunTimeBrowser#${id}`
   };
+}
+
+function applyRuleConfig(issues: AuditIssue[], config: RuleConfig): AuditIssue[] {
+  const suppressions = new Set(
+    (config.suppress ?? []).map((entry) => (typeof entry === "string" ? entry : entry.ruleId))
+  );
+
+  return issues
+    .filter((issueItem) => !suppressions.has(issueItem.ruleId) && !suppressions.has(issueItem.id))
+    .flatMap((issueItem) => {
+      const override = config.severity?.[issueItem.ruleId] ?? config.severity?.[issueItem.id];
+      if (override === "off") {
+        return [];
+      }
+      return [{ ...issueItem, severity: override ?? issueItem.severity }];
+    });
 }
 
 function duplicateLabels(labels: string[]): Array<{ label: string; count: number }> {
@@ -700,11 +1041,74 @@ function normalizeAuditTasks(tasks: AuditTask[] | undefined): AuditTask[] {
     return ["page"];
   }
   const taskNames = tasks as string[];
-  const invalid = taskNames.filter((task) => task !== "page" && task !== "search");
+  const validTasks = new Set<AuditTask>([
+    "page",
+    "search",
+    "auth_form",
+    "form",
+    "form_validation",
+    "modal",
+    "menu",
+    "filter",
+    "pagination",
+    "download",
+    "table"
+  ]);
+  const invalid = taskNames.filter((task) => !validTasks.has(task as AuditTask));
   if (invalid.length > 0) {
     throw new Error(`Unsupported audit task probe: ${invalid.join(", ")}`);
   }
   return tasks;
+}
+
+function normalizeObservationBackend(backend: ObservationBackend | undefined): ObservationBackend {
+  const value = backend ?? "auto";
+  if (value !== "auto" && value !== "cdp_ax_tree" && value !== "playwright_aria" && value !== "dom_semantic") {
+    throw new Error(`Unsupported observation backend: ${String(value)}`);
+  }
+  return value;
+}
+
+function selectedObservationBackend(_requested: ObservationBackend): ObservationBackend {
+  return "dom_semantic";
+}
+
+function fallbackChainFor(requested: ObservationBackend): ObservationBackend[] {
+  if (requested === "dom_semantic") {
+    return ["dom_semantic"];
+  }
+  if (requested === "playwright_aria") {
+    return ["playwright_aria", "dom_semantic"];
+  }
+  if (requested === "cdp_ax_tree") {
+    return ["cdp_ax_tree", "dom_semantic"];
+  }
+  return ["cdp_ax_tree", "playwright_aria", "dom_semantic"];
+}
+
+function validateAuditConfig(config: AuditConfig): void {
+  normalizeAuditOptions(config);
+  for (const target of config.targets ?? []) {
+    if (!target.url) {
+      throw new Error("Audit target is missing a URL.");
+    }
+    normalizeAuditOptions({ ...config, ...target });
+  }
+}
+
+function validateRuleConfig(config: RuleConfig): void {
+  const knownRuleIds = new Set(listRules().flatMap((rule) => [rule.id, rule.ruleId]));
+  for (const ruleId of Object.keys(config.severity ?? {})) {
+    if (!knownRuleIds.has(ruleId)) {
+      throw new Error(`Unknown audit rule ID in severity override: ${ruleId}`);
+    }
+  }
+  for (const suppression of config.suppress ?? []) {
+    const ruleId = typeof suppression === "string" ? suppression : suppression.ruleId;
+    if (!knownRuleIds.has(ruleId)) {
+      throw new Error(`Unknown audit rule ID in suppression: ${ruleId}`);
+    }
+  }
 }
 
 function hasExplicitSponsoredRegion(state: StructuredState): boolean {

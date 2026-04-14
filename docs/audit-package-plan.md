@@ -2,6 +2,22 @@
 
 This plan captures the known gaps for making `agentability-audit` a mature npm package and product surface. Every item below is treated as required work; ordering in this document is by work area, not priority.
 
+## Implemented In The Current Package Pass
+
+- Added observation backend request metadata and fallback-chain reporting.
+- Added rule catalog APIs with `listRules()` and `getRule()`.
+- Added rule severity overrides and suppressions in config.
+- Added config validation for task names, backend names, and rule IDs.
+- Added score/report metadata versioning.
+- Added task probes for `auth_form`, `form`, `form_validation`, `modal`, `menu`, `filter`, `pagination`, `download`, and `table`.
+- Added additional rules for action target identity, low-confidence actions, duplicate locator fingerprints, missing heading context, skipped probes, modal dismiss actions, and prompt-injection-like page text.
+- Added Playwright context options for headers, storageState, and viewport.
+- Added SARIF and JUnit report formatters.
+- Added `defineConfig()` and `auditProject()` Node APIs.
+- Added CLI commands: `init`, `rules`, `explain`, and `report`.
+- Added CLI flags: `--backend`, `--artifact-dir`, `--storage-state`, `--sarif`, and `--junit`.
+- Expanded package documentation for scores, caught issues, current limitations, multi-target Node API, and CI-oriented outputs.
+
 ## Audit Coverage
 
 - Add a CDP Accessibility tree observation backend using `Accessibility.getFullAXTree`.

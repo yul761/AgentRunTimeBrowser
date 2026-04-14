@@ -16,6 +16,8 @@ As a package:
 npm install -D agentability-audit playwright
 npx playwright install chromium
 npx agentability audit http://localhost:3000 --task page,search --fail-below 80
+npx agentability rules
+npx agentability explain actionability/duplicate-button-labels
 ```
 
 As this repo:
@@ -145,9 +147,11 @@ Write HTML and Markdown reports:
 
 ```bash
 pnpm agentability audit ./baseline/search-fixture.html \
-  --task page,search \
+  --task page,search,auth_form,modal,filter,pagination \
   --html benchmark-results/audit-fixture.html \
-  --markdown benchmark-results/audit-fixture.md
+  --markdown benchmark-results/audit-fixture.md \
+  --sarif benchmark-results/audit-fixture.sarif \
+  --junit benchmark-results/audit-fixture.junit.xml
 ```
 
 Use it as a CI gate:
@@ -163,7 +167,8 @@ import { auditUrl } from "agentability-audit";
 
 const report = await auditUrl("http://localhost:3000", {
   tasks: ["page", "search"],
-  searchQuery: "Richmond ramen"
+  searchQuery: "Richmond ramen",
+  observationBackend: "auto"
 });
 ```
 
@@ -180,6 +185,15 @@ Current MVP task probes:
 
 - `page`: captures structured state and checks whether meaningful elements/actions are exposed.
 - `search`: finds a search-like input, fills a query, submits it, and checks for structured state feedback.
+- `auth_form`, `form`, `form_validation`, `modal`, `menu`, `filter`, `pagination`, `download`, and `table`: run deterministic structured-state probes for common agent-facing page affordances.
+
+Current package commands:
+
+- `agentability audit <url-or-path>`: run an audit and optionally write JSON, HTML, Markdown, SARIF, and JUnit.
+- `agentability init`: create a starter config file.
+- `agentability rules`: list rule metadata.
+- `agentability explain <ruleId>`: explain a rule and its fix.
+- `agentability report <json>`: render an existing JSON report.
 
 Current MVP scoring dimensions:
 

@@ -1,7 +1,8 @@
 import type { BrowserDriver } from "@arb/browser-driver";
 import type { AssertCondition, StructuredState, Target, WaitCondition } from "@arb/schemas";
 import { describe, expect, it } from "vitest";
-import { AgentabilityAuditor } from "../src/index";
+import { AgentabilityAuditor, getRule, listRules } from "../src/index";
+import { formatJunitReport, formatSarifReport } from "../src/reporters";
 
 class MockDriver implements BrowserDriver {
   readonly sessionId = "session-audit";
@@ -81,6 +82,35 @@ describe("agentability auditor", () => {
       expect.arrayContaining([expect.objectContaining({ id: "duplicate-button-labels" })])
     );
     expect(driver.logs).toContain("fill:Richmond ramen");
+  });
+
+  it("supports expanded probes, rule metadata, and CI report formats", async () => {
+    const driver = new MockDriver();
+    const auditor = new AgentabilityAuditor({ driverFactory: () => driver });
+
+    const report = await auditor.auditUrl("https://example.com", {
+      tasks: ["page", "auth_form", "modal", "pagination", "table"],
+      rules: {
+        severity: {
+          "state_feedback/task-probe-skipped": "low"
+        }
+      }
+    });
+
+    expect(listRules().length).toBeGreaterThan(5);
+    expect(getRule("actionability/duplicate-button-labels")?.id).toBe("duplicate-button-labels");
+    expect(report.metadata.requestedObservationBackend).toBe("auto");
+    expect(report.taskProbes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ task: "auth_form", status: "skipped" }),
+        expect.objectContaining({ task: "pagination", status: "skipped" })
+      ])
+    );
+    expect(report.issues).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: "task-probe-skipped", severity: "low" })])
+    );
+    expect(formatSarifReport(report)).toContain('"version": "2.1.0"');
+    expect(formatJunitReport(report)).toContain("<testsuite");
   });
 });
 

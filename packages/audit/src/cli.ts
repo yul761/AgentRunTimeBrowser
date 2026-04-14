@@ -1,11 +1,12 @@
 #!/usr/bin/env node
-import { mkdir, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Command } from "commander";
-import { auditUrl, type AuditConfig, type AuditOptions, type AuditTask } from "./index";
+import { auditUrl, getRule, listRules, type AuditConfig, type AuditOptions, type AuditReport, type AuditTask, type ObservationBackend } from "./index";
 import { loadAuditConfig } from "./config";
-import { formatHtmlReport, formatMarkdownReport, formatTextReport } from "./reporters";
+import { formatHtmlReport, formatJunitReport, formatMarkdownReport, formatSarifReport, formatTextReport } from "./reporters";
 
 interface AuditCommandOptions {
   task?: string;
@@ -14,9 +15,14 @@ interface AuditCommandOptions {
   out?: string;
   html?: string;
   markdown?: string;
+  sarif?: string;
+  junit?: string;
   json?: boolean;
   failBelow?: string;
   config?: string;
+  backend?: string;
+  artifactDir?: string;
+  storageState?: string;
 }
 
 const program = new Command();
@@ -36,9 +42,14 @@ program
   .option("--out <path>", "Write the full JSON audit report to a file")
   .option("--html <path>", "Write an HTML report to a file")
   .option("--markdown <path>", "Write a Markdown report to a file")
+  .option("--sarif <path>", "Write a SARIF report to a file")
+  .option("--junit <path>", "Write a JUnit XML report to a file")
   .option("--json", "Print the full JSON audit report")
   .option("--fail-below <score>", "Exit non-zero if the overall score is below this value")
   .option("--config <path>", "Path to agentability config file")
+  .option("--backend <backend>", "Observation backend: auto, cdp_ax_tree, playwright_aria, dom_semantic")
+  .option("--artifact-dir <path>", "Directory for audit artifacts")
+  .option("--storage-state <path>", "Playwright storageState path for authenticated audits")
   .action(async (urlOrPath: string, options: AuditCommandOptions) => {
     const config = await loadAuditConfig(options.config);
     const auditOptions = mergeAuditOptions(config, options);
@@ -58,6 +69,69 @@ program
     }
   });
 
+program
+  .command("init")
+  .description("Create an agentability config file")
+  .option("--file <path>", "Config file path", "agentability.config.mjs")
+  .action(async (options: { file: string }) => {
+    const outputPath = resolve(process.cwd(), options.file);
+    if (existsSync(outputPath)) {
+      throw new Error(`Config file already exists: ${outputPath}`);
+    }
+    await mkdir(dirname(outputPath), { recursive: true });
+    await writeFile(outputPath, defaultConfigTemplate(), "utf8");
+    console.log(`Created ${outputPath}`);
+  });
+
+program
+  .command("rules")
+  .description("List available audit rules")
+  .action(() => {
+    console.table(
+      listRules().map((rule) => ({
+        ruleId: rule.ruleId,
+        severity: rule.defaultSeverity,
+        category: rule.category,
+        title: rule.title
+      }))
+    );
+  });
+
+program
+  .command("explain")
+  .description("Explain an audit rule")
+  .argument("<rule-id>", "Rule ID or short ID")
+  .action((ruleId: string) => {
+    const rule = getRule(ruleId);
+    if (!rule) {
+      throw new Error(`Unknown audit rule: ${ruleId}`);
+    }
+    console.log(`${rule.ruleId}`);
+    console.log(`Severity: ${rule.defaultSeverity}`);
+    console.log(`Category: ${rule.category}`);
+    console.log("");
+    console.log(rule.title);
+    console.log(rule.rationale);
+    console.log("");
+    console.log(`Fix: ${rule.recommendation}`);
+  });
+
+program
+  .command("report")
+  .description("Render an existing JSON audit report")
+  .argument("<json-report>", "Path to an audit JSON report")
+  .option("--html <path>", "Write an HTML report")
+  .option("--markdown <path>", "Write a Markdown report")
+  .option("--sarif <path>", "Write a SARIF report")
+  .option("--junit <path>", "Write a JUnit XML report")
+  .action(async (jsonReport: string, options: Pick<AuditCommandOptions, "html" | "markdown" | "sarif" | "junit">) => {
+    const report = JSON.parse(await readFile(resolve(process.cwd(), jsonReport), "utf8")) as AuditReport;
+    await writeConfiguredReports(report, { output: {} }, options);
+    if (!options.html && !options.markdown && !options.sarif && !options.junit) {
+      console.log(formatTextReport(report));
+    }
+  });
+
 program.parseAsync(process.argv).catch((error: unknown) => {
   console.error(error instanceof Error ? error.message : String(error));
   process.exitCode = 1;
@@ -68,7 +142,10 @@ function mergeAuditOptions(config: AuditConfig, options: AuditCommandOptions): A
     ...config,
     tasks: options.task ? parseAuditTasks(options.task) : config.tasks,
     searchQuery: options.query ?? config.searchQuery,
-    timeoutMs: options.timeout ? parsePositiveInt(options.timeout, "--timeout") : config.timeoutMs
+    timeoutMs: options.timeout ? parsePositiveInt(options.timeout, "--timeout") : config.timeoutMs,
+    observationBackend: options.backend ? parseObservationBackend(options.backend) : config.observationBackend,
+    artifactDir: options.artifactDir ?? config.artifactDir,
+    storageState: options.storageState ?? config.storageState
   };
 }
 
@@ -80,6 +157,8 @@ async function writeConfiguredReports(
   const jsonPath = options.out ?? config.output?.json;
   const htmlPath = options.html ?? config.output?.html;
   const markdownPath = options.markdown ?? config.output?.markdown;
+  const sarifPath = options.sarif ?? config.output?.sarif;
+  const junitPath = options.junit ?? config.output?.junit;
 
   if (jsonPath) {
     await writeReportFile(jsonPath, `${JSON.stringify(report, null, 2)}\n`);
@@ -89,6 +168,12 @@ async function writeConfiguredReports(
   }
   if (markdownPath) {
     await writeReportFile(markdownPath, formatMarkdownReport(report));
+  }
+  if (sarifPath) {
+    await writeReportFile(sarifPath, formatSarifReport(report));
+  }
+  if (junitPath) {
+    await writeReportFile(junitPath, formatJunitReport(report));
   }
 }
 
@@ -112,11 +197,31 @@ function parseAuditTasks(value: string): AuditTask[] {
     .split(",")
     .map((task) => task.trim())
     .filter(Boolean);
-  const invalid = tasks.filter((task) => task !== "page" && task !== "search");
+  const validTasks = new Set([
+    "page",
+    "search",
+    "auth_form",
+    "form",
+    "form_validation",
+    "modal",
+    "menu",
+    "filter",
+    "pagination",
+    "download",
+    "table"
+  ]);
+  const invalid = tasks.filter((task) => !validTasks.has(task));
   if (invalid.length > 0) {
     throw new Error(`Unsupported audit task probe: ${invalid.join(", ")}`);
   }
   return tasks as AuditTask[];
+}
+
+function parseObservationBackend(value: string): ObservationBackend {
+  if (value === "auto" || value === "cdp_ax_tree" || value === "playwright_aria" || value === "dom_semantic") {
+    return value;
+  }
+  throw new Error(`Unsupported observation backend: ${value}`);
 }
 
 function parseScore(value: string | number | undefined): number | undefined {
@@ -142,4 +247,25 @@ function parsePositiveInt(value: string, label: string): number {
     throw new Error(`Invalid ${label} value: ${value}`);
   }
   return parsed;
+}
+
+function defaultConfigTemplate(): string {
+  return `// Agentability Audit config
+// agentability-audit is the package name; agentability is the CLI binary.
+export default {
+  tasks: ["page"],
+  observationBackend: "auto",
+  failBelow: 80,
+  output: {
+    json: "reports/agentability.json",
+    html: "reports/agentability.html",
+    sarif: "reports/agentability.sarif",
+    junit: "reports/agentability.junit.xml"
+  },
+  rules: {
+    severity: {},
+    suppress: []
+  }
+};
+`;
 }
