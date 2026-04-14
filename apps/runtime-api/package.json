@@ -2,6 +2,7 @@
   "name": "@arb/runtime-api",
   "version": "0.1.0",
   "private": true,
+  "description": "Optional runtime inspection API for Agentability Audit probes.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./src/index.ts",

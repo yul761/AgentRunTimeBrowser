@@ -1,25 +1,55 @@
-# Agent Runtime Browser
+# Agentability Audit
 
-Agent Runtime Browser is a structured browser execution environment for agents. It accepts structured tasks, executes them in a real browser, and returns structured state and results without relying on vision as the primary interaction model.
+Agentability Audit is a local-first toolkit for measuring whether owned websites, staging apps, internal tools, and agent-friendly web flows expose enough structured semantics, executable actions, state feedback, and evidence for trusted AI agents to complete tasks reliably.
 
-It is also a browser-native agent interface layer: it exposes page state, inferred actions, stable semantic element identity, and state transitions as structured primitives for agents.
+The project includes a browser runtime engine, but the product purpose is audit: run deterministic browser probes, collect structured page state, score the page, and return actionable issues for web teams.
 
-The project is evolving toward Agentability Audit: a local-first toolkit for measuring whether owned websites, staging apps, and agent-friendly web flows expose enough semantics, executable actions, state feedback, and evidence for AI agents to complete tasks reliably.
+This is not a chat agent, not a natural-language browser assistant, not a vision-first browser agent, and not a tool for bypassing sites that block automation. It is for consent-based agent access: teams that want their own web apps or customer-facing flows to be understandable, safe, and debuggable for trusted agents.
 
-This is not a chat agent, not a natural-language browser assistant, not a vision-first browser agent, and not a generic wrapper around Playwright. Playwright is an internal browser engine dependency; the public product interface is the runtime task protocol plus the `arb` CLI.
+Screenshots are only used for human observation in the monitor UI. The default audit path reads structured browser state and inferred actions rather than using vision as the primary interaction model.
 
-This project is not meant to bypass sites that block automation. It is for consent-based agent access: teams that want their own web apps or customer-facing flows to be understandable, safe, and debuggable for trusted agents.
+## What It Does
+
+```bash
+pnpm arb audit ./baseline/search-fixture.html --task page,search
+```
+
+The audit command opens the page in Chromium, extracts structured browser state, runs optional task probes, and reports:
+
+- Overall Agentability score.
+- Semantic discoverability score.
+- Actionability score.
+- State feedback score.
+- Recoverability score.
+- Agent safety score.
+- Task probe results.
+- Prioritized issues with evidence and repair guidance.
+
+Example output:
+
+```text
+Agentability audit for file:///.../baseline/search-fixture.html#results
+Overall score: 88/100
+
+Task probes:
+- page: passed steps=1 effects=structured_state_captured
+- search: passed steps=2 effects=url_changed,results_region_detected
+
+Issues:
+- [medium] actionability: Duplicate button labels make actions ambiguous
+  Fix: Include the object name in repeated controls, for example aria-label="View details for Ramen DANBO".
+```
 
 ## Architecture
 
 ```text
-External agent / CLI
+arb audit / CI / local developer
         |
         v
-Runtime API: tasks, capabilities, state profiles, state deltas, evidence, snapshot
+Agentability Audit Layer: scoring, issues, probes, report output
         |
         v
-Task Runtime Layer: validation, deterministic planning, step execution, evidence
+Browser Runtime Engine: deterministic steps, state deltas, logs, evidence
         |
         v
 Driver Layer: openPage, click, fill, press, waitFor, extractText, getStructuredState
@@ -28,21 +58,22 @@ Driver Layer: openPage, click, fill, press, waitFor, extractText, getStructuredS
 Browser Engine Layer: Playwright-controlled Chromium
 
 Structured state includes semantic elements, action graph, intent regions, and state IDs.
-Monitor UI polls the Runtime API for task progress, logs, structured state, extracted data,
-and a human-only preview snapshot.
+The probe inspection API and monitor UI remain available as developer tools for inspecting lower-level execution.
 ```
 
 ## Workspace
 
 ```text
-apps/runtime-api       Express runtime API
-apps/monitor-ui        React + Vite monitor UI
-packages/schemas       Zod task/result/state/error schemas
-packages/core          In-memory task store and runtime error helpers
+packages/audit         Agentability scoring, issue generation, and task probes
 packages/browser-driver Playwright-backed browser driver abstraction
-packages/task-engine   Deterministic task executor
-packages/cli           arb CLI
-examples               Structured task examples
+packages/task-engine   Deterministic runtime engine for structured probes
+packages/schemas       Zod task/result/state/error/audit schemas
+packages/core          In-memory task store, state delta, profiling, error helpers
+packages/cli           arb CLI, including arb audit
+apps/runtime-api       Optional Express API for inspecting probe execution
+apps/monitor-ui        Optional React + Vite monitor UI for execution observation
+baseline               Baseline LLM browser agent and benchmark fixtures
+examples               Structured runtime task examples
 ```
 
 ## Setup
@@ -59,6 +90,59 @@ Install Playwright Chromium if it is not already present:
 pnpm exec playwright install chromium
 ```
 
+Set `ARB_HEADLESS=false` to show the Playwright-controlled Chromium window during local audit runs.
+
+## Audit CLI
+
+Run a basic page audit:
+
+```bash
+pnpm arb audit https://example.com
+```
+
+Run a local fixture audit with a deterministic search probe:
+
+```bash
+pnpm arb audit ./baseline/search-fixture.html --task page,search
+```
+
+Save a full JSON report:
+
+```bash
+pnpm arb audit ./baseline/search-fixture.html \
+  --task page,search \
+  --out benchmark-results/audit-fixture.json
+```
+
+Print JSON to stdout:
+
+```bash
+pnpm arb audit ./baseline/search-fixture.html --task page,search --json
+```
+
+Use it as a CI gate:
+
+```bash
+pnpm arb audit https://preview.example.com --task page,search --fail-below 80
+```
+
+Current MVP task probes:
+
+- `page`: captures structured state and checks whether meaningful elements/actions are exposed.
+- `search`: finds a search-like input, fills a query, submits it, and checks for structured state feedback.
+
+Current MVP scoring dimensions:
+
+- `semanticDiscoverability`: agents can find labels, roles, headings, forms, and regions.
+- `actionability`: executable controls can be inferred without ambiguous labels.
+- `stateFeedback`: task probes can observe useful URL, title, text, or region changes after actions.
+- `recoverability`: exposed elements have semantic IDs, locator fingerprints, and lineage.
+- `agentSafety`: paid or risky content should be distinguishable from primary task content.
+
+## Optional Probe Inspection Tools
+
+The inspection API is still available for lower-level debugging and for external agents that need structured browser execution. It is not the primary product surface.
+
 Start the API only:
 
 ```bash
@@ -74,33 +158,25 @@ pnpm arb dev
 Default URLs:
 
 ```text
-Runtime API: http://localhost:8787
+Probe inspection API: http://localhost:8787
 Monitor UI: http://localhost:5173
 ```
 
-Set `ARB_HEADLESS=false` to show the Playwright-controlled Chromium window during local runs.
-
-## Runtime API
-
-Submit a deterministic web search:
+Submit and inspect structured probe tasks:
 
 ```bash
-curl -X POST http://localhost:8787/tasks \
-  -H 'content-type: application/json' \
-  --data @examples/google-search.json
+pnpm arb submit --file ./examples/google-search.json
+pnpm arb tasks
+pnpm arb task <taskId>
+pnpm arb state <taskId>
+pnpm arb logs <taskId>
 ```
 
-Submit an explicit workflow:
+Probe inspection API endpoints:
 
 ```bash
-curl -X POST http://localhost:8787/tasks \
-  -H 'content-type: application/json' \
-  --data @examples/extract-headings.json
-```
-
-Inspect runtime state:
-
-```bash
+curl http://localhost:8787/health
+curl http://localhost:8787/capabilities
 curl http://localhost:8787/tasks
 curl http://localhost:8787/tasks/<taskId>
 curl http://localhost:8787/tasks/<taskId>/state
@@ -109,45 +185,24 @@ curl 'http://localhost:8787/tasks/<taskId>/state-delta?since=<stateId>'
 curl http://localhost:8787/tasks/<taskId>/logs
 curl http://localhost:8787/tasks/<taskId>/evidence
 curl http://localhost:8787/tasks/<taskId>/snapshot
-curl http://localhost:8787/capabilities
 ```
 
-The snapshot endpoint exists for the human monitor UI only. Screenshots are not used as the task understanding or execution interface.
+The snapshot endpoint exists for the human monitor UI only. Screenshots are not used as the primary state or action interface.
 
-Query a task-scoped view of the latest state:
+## Structured Browser Primitives
 
-```bash
-curl -X POST http://localhost:8787/state/query \
-  -H 'content-type: application/json' \
-  --data '{
-    "taskHint": "login",
-    "include": ["forms", "buttons", "errors", "navigation"],
-    "exclude": ["footer", "ads", "decorative"],
-    "profile": "form_mode"
-  }'
-```
+Audit reports and runtime probes are built on structured browser state:
 
-## CLI
-
-```bash
-pnpm arb submit --file ./examples/google-search.json
-pnpm arb tasks
-pnpm arb task <taskId>
-pnpm arb state <taskId>
-pnpm arb logs <taskId>
-pnpm arb audit https://example.com
-pnpm arb audit ./baseline/search-fixture.html --task page,search --out benchmark-results/audit-fixture.json
-```
-
-Use another API URL:
-
-```bash
-pnpm arb --api-url http://localhost:8787 tasks
-```
+- `stateId`: observation ID for deltas and evidence.
+- Stable semantic identity on each exposed element: `elementInstanceId`, `semanticElementId`, `locatorFingerprint`, and `lineage`.
+- `actionGraph.actions`: inferred executable actions such as `click`, `submit_form`, `open_link`, `toggle`, `focus`, `download`, and `dismiss_dialog`.
+- `regions`: intent-level groups such as `search_interface`, `auth_form`, `results_list`, `navigation_bar`, `modal_dialog`, `primary_content`, and `secondary_content`.
+- Observation profiles: `minimal`, `interactive_only`, `form_mode`, `navigation_mode`, and `full`.
+- Step evidence: completed runtime steps can record before/after state IDs, observed effects, DOM delta summary, network summary, console summary, and assertion evidence.
 
 ## Benchmarking
 
-The repo includes a baseline LLM browser agent for comparison against the structured runtime:
+The repo includes a baseline LLM browser agent for comparison against the deterministic structured runtime engine:
 
 ```bash
 pnpm baseline
@@ -161,36 +216,22 @@ pnpm compare
 - `runtime_observed`: captures preview snapshots and step evidence.
 - `runtime_lean`: skips preview snapshots and step evidence for lower fixed overhead.
 
-Use `COMPARE_TARGETS=complex_fixture,live_web pnpm compare` to run a smaller matrix.
-
-## Agentability Audit
-
-`arb audit` checks whether a page is structurally ready for AI-agent use. It reads the runtime's structured browser state, scores the page, runs optional deterministic probes, and emits issues with evidence and repair guidance.
-
-Current MVP scoring dimensions:
-
-- Semantic discoverability: agents can find labels, roles, headings, forms, and regions.
-- Actionability: executable controls can be inferred without ambiguous labels.
-- State feedback: task probes can observe useful URL, title, text, or region changes after actions.
-- Recoverability: exposed elements have semantic IDs, locator fingerprints, and lineage.
-- Agent safety: paid or risky content should be distinguishable from primary task content.
-
-Example:
+Use a smaller matrix:
 
 ```bash
-pnpm arb audit ./baseline/search-fixture.html --task page,search
+COMPARE_TARGETS=complex_fixture,live_web pnpm compare
 ```
 
-Output includes an overall score, category scores, task probe results, and prioritized issues such as duplicate button names or missing labels. Use `--json` for the full report or `--out <path>` to save it.
+## Runtime Task Protocol
 
-## Task Protocol
+This protocol is a lower-level engine interface used by audit probes and external structured agents.
 
-MVP task types:
+Task types:
 
 - `workflow.execute`: caller provides explicit steps.
-- `web.search`: caller provides `{ "engine": "google", "query": "..." }`; the runtime translates this into deterministic internal workflow steps without an LLM.
+- `web.search`: caller provides `{ "engine": "google", "query": "..." }`; the engine translates this into deterministic internal workflow steps without an LLM.
 
-MVP actions:
+Actions:
 
 - `navigate`
 - `click`
@@ -225,65 +266,38 @@ Task submissions can include optional runtime execution settings:
 }
 ```
 
-The lean runtime mode is intended for agent-to-runtime execution where the agent needs structured state and results but does not need a human preview snapshot for every step.
-
-## Browser-Native Agent Primitives
-
-Structured state includes more than element lists:
-
-- `stateId`: runtime observation ID for deltas and evidence.
-- Stable semantic identity on each exposed element: `elementInstanceId`, `semanticElementId`, `locatorFingerprint`, and `lineage`.
-- `actionGraph.actions`: inferred executable actions such as `click`, `submit_form`, `open_link`, `toggle`, `focus`, `download`, and `dismiss_dialog`.
-- `regions`: intent-level groups such as `search_interface`, `auth_form`, `results_list`, `navigation_bar`, `modal_dialog`, `primary_content`, and `secondary_content`.
-- Observation profiles: `minimal`, `interactive_only`, `form_mode`, `navigation_mode`, and `full`.
-- Step evidence: each completed step records before/after state IDs, observed effects, DOM delta summary, network summary, console summary, and assertion evidence.
-
-The runtime infers these primitives from page structure and interactivity. It does not use screenshots as the primary state or action interface.
-
-## Implementation Priority
-
-Current MVP priorities:
-
-- Schemas.
-- Browser driver abstraction.
-- Task engine for `workflow.execute`.
-- Runtime API.
-- CLI.
-- Structured state extraction.
-- Monitor UI.
-- Deterministic `web.search`.
-- Stable semantic identity.
-- Action graph generation.
-- State delta API.
-- Intent regions.
-- Task-scoped state.
-
 ## MVP Complete
 
-- Structured task submission and validation.
+- Agentability audit CLI with scoring, task probes, issue generation, JSON output, and CI threshold support.
+- Structured task submission and validation for the runtime engine.
 - Playwright Chromium execution behind a driver interface.
 - Step-by-step deterministic execution with logs and status.
 - Structured page state extraction for headings, buttons, inputs, links, forms, visible text summary, and available action candidates.
 - Action graph generation, stable semantic element identity, intent regions, state profiles, task-scoped state query, state delta API, and step evidence.
-- Structured task results, extracted data, and normalized runtime errors.
-- Express API, `arb` CLI, React monitor UI, and example tasks.
+- Baseline LLM browser agent and comparison benchmark.
+- Express API and React monitor UI for runtime inspection.
 
 ## Intentionally Left Out
 
-- LLM planning or fallback.
+- Hosted audit service.
+- HTML audit report viewer.
+- GitHub Action wrapper.
+- LLM planning or fallback in the audit path.
 - Free-form natural language as the main interface.
 - Chat-with-browser UX.
 - Vision-first page understanding.
+- Bypassing automation blocks on sites that do not consent to agent access.
 - Persistent database storage.
 - Cloud, distributed workers, multi-tenant auth, and remote browser pools.
 - Full embedded browser streaming. The MVP uses latest snapshot preview for observation.
 
 ## Recommended v2
 
-- Replace the in-memory task store with SQLite or Postgres.
-- Add task cancellation and browser session retention controls.
-- Add an event stream for UI updates instead of polling.
-- Add richer structured extraction for tables, menus, dialogs, and ARIA landmarks.
+- Make CDP Accessibility tree / Playwright AI snapshot the primary observation backend, with DOM semantic extraction as fallback.
+- Add HTML audit reports for product and frontend teams.
+- Add a GitHub Action for preview-environment regression checks.
+- Add more deterministic probes: auth form, checkout-like form, modal dialog, filtering, pagination, and destructive action confirmation.
+- Add richer issue rules for tables, menus, dialogs, ARIA landmarks, sponsored content, and prompt-injection-like page text.
 - Add replay artifacts with deterministic step inputs, state deltas, and network summaries.
-- Add typed SDK clients for external agents.
-- Harden stable semantic identity across frames, shadow DOM, SPA transitions, and long-lived sessions.
+- Replace the in-memory task store with SQLite or Postgres when reports need persistence.
+- Add typed SDK clients for teams embedding audit checks into their own agent platforms.

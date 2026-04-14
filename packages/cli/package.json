@@ -2,6 +2,7 @@
   "name": "@arb/cli",
   "version": "0.1.0",
   "private": true,
+  "description": "Agentability Audit command line interface.",
   "type": "module",
   "bin": {
     "arb": "./dist/index.js"

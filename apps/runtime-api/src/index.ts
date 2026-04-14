@@ -33,9 +33,9 @@ export function createApp(services = createRuntimeServices()): Express {
   app.get("/health", (_req, res) => {
     res.json({
       ok: true,
-      service: "agent-runtime-browser",
+      service: "agentability-audit-runtime",
       positioning:
-        "Agent Runtime Browser is a browser-native agent interface layer for structured browser execution.",
+        "Agentability Audit uses this browser runtime engine to run deterministic probes and collect structured evidence.",
       timestamp: new Date().toISOString()
     });
   });
@@ -224,8 +224,9 @@ export function createApp(services = createRuntimeServices()): Express {
 export async function startServer(port = Number(process.env.ARB_PORT ?? 8787)) {
   const app = createApp();
   return app.listen(port, () => {
-    console.log(`Agent Runtime Browser API listening on http://localhost:${port}`);
-    console.log("POST structured tasks to /tasks; monitor UI defaults to http://localhost:5173");
+    console.log(`Agentability Audit runtime inspection API listening on http://localhost:${port}`);
+    console.log("Run audits with `arb audit`; POST lower-level structured tasks to /tasks when debugging probes.");
+    console.log("Probe monitor UI defaults to http://localhost:5173");
   });
 }
 

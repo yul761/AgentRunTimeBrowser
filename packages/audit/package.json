@@ -2,6 +2,7 @@
   "name": "@arb/audit",
   "version": "0.1.0",
   "private": true,
+  "description": "Agentability scoring, issue generation, and deterministic task probes.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./src/index.ts",

@@ -13,18 +13,18 @@ const program = new Command();
 
 program
   .name("arb")
-  .description("Agent Runtime Browser CLI")
+  .description("Agentability Audit CLI")
   .version("0.1.0")
-  .option("--api-url <url>", "Runtime API URL", defaultApiUrl);
+  .option("--api-url <url>", "Optional runtime inspection API URL", defaultApiUrl);
 
 program
   .command("dev")
-  .description("Start the local runtime API and monitor UI")
+  .description("Start optional local runtime inspection services")
   .action(() => {
-    console.log("Starting Agent Runtime Browser dev services");
-    console.log(`Runtime API: ${defaultApiUrl}`);
-    console.log("Monitor UI: http://localhost:5173");
-    console.log("Submit a task with: arb submit --file ./examples/google-search.json");
+    console.log("Starting Agentability Audit runtime inspection services");
+    console.log(`Runtime inspection API: ${defaultApiUrl}`);
+    console.log("Probe monitor UI: http://localhost:5173");
+    console.log("Run an audit with: arb audit ./baseline/search-fixture.html --task page,search");
 
     const children: ChildProcess[] = [
       spawn("pnpm", ["--filter", "@arb/runtime-api", "dev"], {
@@ -55,7 +55,7 @@ program
 
 program
   .command("submit")
-  .description("Submit a structured task JSON file")
+  .description("Submit a lower-level structured runtime task JSON file")
   .requiredOption("--file <path>", "Path to task JSON file")
   .action(async (options: { file: string }) => {
     const filePath = resolve(process.cwd(), options.file);
@@ -74,7 +74,7 @@ program
 
 program
   .command("tasks")
-  .description("List current runtime tasks")
+  .description("List current runtime probe tasks")
   .action(async () => {
     const tasks = await apiRequest("/tasks");
     if (!Array.isArray(tasks) || tasks.length === 0) {
@@ -95,7 +95,7 @@ program
 
 program
   .command("task")
-  .description("Show task details")
+  .description("Show runtime probe task details")
   .argument("<id>", "Task ID")
   .action(async (id: string) => {
     const task = await apiRequest(`/tasks/${id}`);
@@ -116,7 +116,7 @@ program
 
 program
   .command("state")
-  .description("Show latest structured state for a task")
+  .description("Show latest structured browser state for a runtime task")
   .argument("<id>", "Task ID")
   .action(async (id: string) => {
     const response = await apiRequest(`/tasks/${id}/state`);
@@ -125,7 +125,7 @@ program
 
 program
   .command("logs")
-  .description("Show logs for a task")
+  .description("Show logs for a runtime task")
   .argument("<id>", "Task ID")
   .action(async (id: string) => {
     const response = await apiRequest(`/tasks/${id}/logs`);
@@ -199,7 +199,7 @@ async function apiRequest(path: string, init?: RequestInit): Promise<any> {
 
   if (!response.ok) {
     const message = typeof body === "object" && body?.error ? `${body.error.code}: ${body.error.message}` : body;
-    throw new Error(`Runtime API request failed (${response.status}): ${message}`);
+    throw new Error(`Probe inspection API request failed (${response.status}): ${message}`);
   }
 
   return body;

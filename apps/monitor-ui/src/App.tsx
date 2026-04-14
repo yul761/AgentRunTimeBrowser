@@ -94,12 +94,12 @@ export function App() {
     <main className="shell">
       <aside className="task-list" aria-label="Tasks">
         <div className="topline">
-          <h1>Agent Runtime Browser</h1>
-          <span>{tasks.length} tasks</span>
+          <h1>Agentability Probe Monitor</h1>
+          <span>{tasks.length} probes</span>
         </div>
         {error ? <p className="error">{error}</p> : null}
         <div className="tasks">
-          {tasks.length === 0 ? <p className="muted">No tasks submitted.</p> : null}
+          {tasks.length === 0 ? <p className="muted">No probe tasks submitted.</p> : null}
           {tasks.map((task) => (
             <button
               className={`task-row ${task.taskId === selectedTaskId ? "selected" : ""}`}
@@ -121,7 +121,7 @@ export function App() {
 
       <section className="detail" aria-label="Task detail">
         {!selectedTask ? (
-          <div className="empty">Submit a structured task to begin.</div>
+          <div className="empty">Run an audit probe or submit a structured runtime task to begin.</div>
         ) : (
           <>
             <header className="detail-header">
@@ -213,7 +213,7 @@ function Panel({ title, children }: { title: string; children: React.ReactNode }
 async function getJson<T>(path: string): Promise<T> {
   const response = await fetch(`${apiUrl}${path}`);
   if (!response.ok) {
-    throw new Error(`Runtime API ${response.status} for ${path}`);
+    throw new Error(`Probe inspection API ${response.status} for ${path}`);
   }
   return response.json() as Promise<T>;
 }
