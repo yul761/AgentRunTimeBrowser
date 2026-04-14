@@ -15,7 +15,7 @@
       "@arb/schemas": ["packages/schemas/src/index.ts"],
       "@arb/core": ["packages/core/src/index.ts"],
       "@arb/browser-driver": ["packages/browser-driver/src/index.ts"],
-      "@arb/audit": ["packages/audit/src/index.ts"],
+      "agentability-audit": ["packages/audit/src/index.ts"],
       "@arb/task-engine": ["packages/task-engine/src/index.ts"],
       "@arb/cli": ["packages/cli/src/index.ts"]
     }

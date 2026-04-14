@@ -1,5 +1,5 @@
 {
-  "name": "agentability-audit",
+  "name": "agentability-audit-workspace",
   "description": "Local-first Agentability Audit toolkit with a structured browser runtime engine.",
   "version": "0.1.0",
   "private": true,
@@ -7,11 +7,13 @@
   "packageManager": "pnpm@10.28.2",
   "scripts": {
     "arb": "tsx --conditions=development packages/cli/src/index.ts",
+    "agentability": "tsx --conditions=development packages/audit/src/cli.ts",
     "baseline": "tsx baseline/benchmark.ts",
     "compare": "tsx --tsconfig tsconfig.base.json --conditions=development baseline/compare.ts",
     "build": "pnpm -r build",
     "dev": "pnpm --filter @arb/runtime-api dev",
     "dev:ui": "pnpm --filter @arb/monitor-ui dev",
+    "pack:audit": "pnpm --filter agentability-audit pack:dry",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck && pnpm typecheck:baseline",
     "typecheck:baseline": "tsc -p baseline/tsconfig.json"

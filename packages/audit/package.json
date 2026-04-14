@@ -1,26 +1,78 @@
 {
-  "name": "@arb/audit",
+  "name": "agentability-audit",
   "version": "0.1.0",
-  "private": true,
-  "description": "Agentability scoring, issue generation, and deterministic task probes.",
+  "description": "Local-first Agentability Audit toolkit for testing whether web flows are ready for trusted AI agents.",
   "type": "module",
+  "license": "MIT",
+  "author": "Yuchen Lin",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yul761/AgentRunTimeBrowser.git",
+    "directory": "packages/audit"
+  },
+  "bugs": {
+    "url": "https://github.com/yul761/AgentRunTimeBrowser/issues"
+  },
+  "homepage": "https://github.com/yul761/AgentRunTimeBrowser#readme",
+  "keywords": [
+    "agentability",
+    "ai-agent",
+    "browser",
+    "audit",
+    "playwright",
+    "accessibility",
+    "testing",
+    "automation",
+    "ci"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "sideEffects": false,
+  "bin": {
+    "agentability": "./dist/cli.js",
+    "agentability-audit": "./dist/cli.js"
+  },
   "main": "./dist/index.js",
-  "types": "./src/index.ts",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./src/index.ts",
+      "types": "./dist/index.d.ts",
       "development": "./src/index.ts",
       "import": "./dist/index.js"
-    }
+    },
+    "./package.json": "./package.json"
   },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
   "scripts": {
-    "build": "tsup src/index.ts --format esm --dts --clean",
+    "build": "tsup",
+    "prepack": "tsup",
+    "pack:dry": "npm pack --dry-run",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "commander": "^12.1.0"
+  },
+  "peerDependencies": {
+    "playwright": ">=1.49.0"
+  },
+  "devDependencies": {
     "@arb/browser-driver": "workspace:*",
     "@arb/core": "workspace:*",
-    "@arb/schemas": "workspace:*"
+    "@arb/schemas": "workspace:*",
+    "@types/node": "^22.10.2",
+    "playwright": "^1.49.1",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
   }
 }

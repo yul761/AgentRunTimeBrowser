@@ -66,7 +66,7 @@ class MockDriver implements BrowserDriver {
 describe("agentability auditor", () => {
   it("scores structured state and records search probes", async () => {
     const driver = new MockDriver();
-    const auditor = new AgentabilityAuditor(() => driver);
+    const auditor = new AgentabilityAuditor({ driverFactory: () => driver });
 
     const report = await auditor.auditUrl("https://example.com", {
       tasks: ["page", "search"],

@@ -88,6 +88,10 @@ importers:
 
   packages/audit:
     dependencies:
+      commander:
+        specifier: ^12.1.0
+        version: 12.1.0
+    devDependencies:
       '@arb/browser-driver':
         specifier: workspace:*
         version: link:../browser-driver
@@ -97,6 +101,21 @@ importers:
       '@arb/schemas':
         specifier: workspace:*
         version: link:../schemas
+      '@types/node':
+        specifier: ^22.10.2
+        version: 22.19.17
+      playwright:
+        specifier: ^1.49.1
+        version: 1.59.1
+      tsup:
+        specifier: ^8.3.5
+        version: 8.5.1(postcss@8.5.9)(tsx@4.21.0)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.19.17)(happy-dom@15.11.7)
 
   packages/browser-driver:
     dependencies:
@@ -112,12 +131,9 @@ importers:
 
   packages/cli:
     dependencies:
-      '@arb/audit':
+      agentability-audit:
         specifier: workspace:*
         version: link:../audit
-      '@arb/schemas':
-        specifier: workspace:*
-        version: link:../schemas
       commander:
         specifier: ^12.1.0
         version: 12.1.0

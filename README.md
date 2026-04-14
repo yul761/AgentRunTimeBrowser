@@ -10,6 +10,16 @@ Screenshots are only used for human observation in the monitor UI. The default a
 
 ## What It Does
 
+As a package:
+
+```bash
+npm install -D agentability-audit playwright
+npx playwright install chromium
+npx agentability audit http://localhost:3000 --task page,search --fail-below 80
+```
+
+As this repo:
+
 ```bash
 pnpm arb audit ./baseline/search-fixture.html --task page,search
 ```
@@ -94,6 +104,17 @@ Set `ARB_HEADLESS=false` to show the Playwright-controlled Chromium window durin
 
 ## Audit CLI
 
+For npm users, run the published package CLI as `agentability`:
+
+```bash
+npm install -D agentability-audit playwright
+npx agentability audit https://example.com --task page,search
+# or, for one-off package execution:
+npx agentability-audit audit https://example.com --task page,search
+```
+
+For repo development, use the workspace CLI:
+
 Run a basic page audit:
 
 ```bash
@@ -120,10 +141,39 @@ Print JSON to stdout:
 pnpm arb audit ./baseline/search-fixture.html --task page,search --json
 ```
 
+Write HTML and Markdown reports:
+
+```bash
+pnpm agentability audit ./baseline/search-fixture.html \
+  --task page,search \
+  --html benchmark-results/audit-fixture.html \
+  --markdown benchmark-results/audit-fixture.md
+```
+
 Use it as a CI gate:
 
 ```bash
 pnpm arb audit https://preview.example.com --task page,search --fail-below 80
+```
+
+Node API:
+
+```ts
+import { auditUrl } from "agentability-audit";
+
+const report = await auditUrl("http://localhost:3000", {
+  tasks: ["page", "search"],
+  searchQuery: "Richmond ramen"
+});
+```
+
+Use an existing Playwright page:
+
+```ts
+import { auditPage } from "agentability-audit";
+
+await page.goto("http://localhost:3000");
+const report = await auditPage(page, { tasks: ["page"] });
 ```
 
 Current MVP task probes:
@@ -280,7 +330,7 @@ Task submissions can include optional runtime execution settings:
 ## Intentionally Left Out
 
 - Hosted audit service.
-- HTML audit report viewer.
+- Interactive hosted audit report viewer.
 - GitHub Action wrapper.
 - LLM planning or fallback in the audit path.
 - Free-form natural language as the main interface.
@@ -294,7 +344,7 @@ Task submissions can include optional runtime execution settings:
 ## Recommended v2
 
 - Make CDP Accessibility tree / Playwright AI snapshot the primary observation backend, with DOM semantic extraction as fallback.
-- Add HTML audit reports for product and frontend teams.
+- Add an interactive report viewer for product and frontend teams.
 - Add a GitHub Action for preview-environment regression checks.
 - Add more deterministic probes: auth form, checkout-like form, modal dialog, filtering, pagination, and destructive action confirmation.
 - Add richer issue rules for tables, menus, dialogs, ARIA landmarks, sponsored content, and prompt-injection-like page text.

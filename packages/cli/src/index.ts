@@ -3,8 +3,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { auditUrl, type AuditOptions } from "@arb/audit";
-import type { AuditIssue, AuditReport, AuditTaskProbe } from "@arb/schemas";
+import { auditUrl, type AuditIssue, type AuditOptions, type AuditReport, type AuditTaskProbe } from "agentability-audit";
 import { Command } from "commander";
 
 const defaultApiUrl = process.env.ARB_API_URL ?? "http://localhost:8787";
