@@ -1,0 +1,149 @@
+{
+  "reportId": "sample-agentability-report",
+  "url": "https://example.com",
+  "finalUrl": "https://example.com/search?q=ramen",
+  "title": "Search Results",
+  "generatedAt": "2026-04-14T00:00:00.000Z",
+  "scores": {
+    "overall": 86,
+    "semanticDiscoverability": 88,
+    "actionability": 84,
+    "stateFeedback": 90,
+    "recoverability": 82,
+    "agentSafety": 86
+  },
+  "issues": [
+    {
+      "id": "duplicate-button-labels",
+      "ruleId": "actionability/duplicate-button-labels",
+      "severity": "medium",
+      "category": "actionability",
+      "title": "Duplicate button labels make actions ambiguous",
+      "message": "Multiple buttons expose the same label, which makes agent targeting less reliable.",
+      "recommendation": "Include the object name in repeated controls."
+    }
+  ],
+  "taskProbes": [
+    {
+      "task": "page",
+      "status": "passed",
+      "steps": 1,
+      "observedEffects": ["structured_state_captured"],
+      "error": null,
+      "durationMs": 32
+    },
+    {
+      "task": "search",
+      "status": "passed",
+      "steps": 2,
+      "observedEffects": ["url_changed", "results_region_detected"],
+      "error": null,
+      "durationMs": 410
+    }
+  ],
+  "observations": [
+    {
+      "backend": "cdp_ax_tree",
+      "status": "captured",
+      "capturedAt": "2026-04-14T00:00:00.000Z",
+      "summary": {
+        "nodeCount": 42,
+        "roles": {
+          "RootWebArea": 1,
+          "button": 4,
+          "link": 6,
+          "textbox": 1
+        },
+        "supportLevel": "native_cdp"
+      }
+    }
+  ],
+  "replay": {
+    "steps": [
+      {
+        "task": "search",
+        "status": "passed",
+        "startedAt": "2026-04-14T00:00:00.000Z",
+        "finishedAt": "2026-04-14T00:00:00.410Z",
+        "durationMs": 410,
+        "beforeStateId": "state-before",
+        "afterStateId": "state-after",
+        "observedEffects": ["url_changed", "results_region_detected"],
+        "domDeltaSummary": {
+          "urlChanged": true,
+          "titleChanged": false,
+          "elementsAdded": 5,
+          "elementsRemoved": 0,
+          "actionsAdded": 5,
+          "actionsRemoved": 0,
+          "majorTextChanges": 3,
+          "dialogChanges": 0
+        },
+        "networkSummary": {
+          "requests": 3,
+          "failedRequests": 0,
+          "statusCodes": { "200": 3 },
+          "sampledUrls": ["GET https://example.com/search?q=ramen"]
+        },
+        "consoleSummary": {
+          "messages": 0,
+          "errors": 0,
+          "warnings": 0,
+          "samples": []
+        },
+        "error": null
+      }
+    ]
+  },
+  "trend": {
+    "score": 86,
+    "issueCount": 1,
+    "issueCountsBySeverity": {
+      "high": 0,
+      "medium": 1,
+      "low": 0,
+      "info": 0
+    },
+    "probeStatusCounts": {
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0
+    }
+  },
+  "state": {
+    "stateId": "state-after",
+    "sessionId": "sample-session",
+    "pageId": "sample-page",
+    "url": "https://example.com/search?q=ramen",
+    "title": "Search Results",
+    "buttons": [],
+    "inputs": [],
+    "links": [],
+    "headings": [],
+    "forms": [],
+    "visibleTextSummary": ["Results for ramen"],
+    "availableActions": [],
+    "actionGraph": { "actions": [] },
+    "regions": [],
+    "timestamp": "2026-04-14T00:00:00.000Z"
+  },
+  "metadata": {
+    "packageName": "agentability-audit",
+    "reportVersion": "0.3",
+    "scoreModelVersion": "0.3",
+    "observationBackend": "cdp_ax_tree",
+    "requestedObservationBackend": "auto",
+    "fallbackChain": ["cdp_ax_tree", "playwright_aria", "dom_semantic"],
+    "localOnly": true,
+    "support": {
+      "structuredState": true,
+      "actionGraph": true,
+      "stateDelta": true,
+      "preview": "human_review_only",
+      "download": "safe_capture_probe",
+      "frame": "partial",
+      "shadowDom": "partial",
+      "canvasSemantic": "unsupported"
+    }
+  }
+}

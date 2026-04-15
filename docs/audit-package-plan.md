@@ -5,18 +5,24 @@ This plan captures the known gaps for making `agentability-audit` a mature npm p
 ## Implemented In The Current Package Pass
 
 - Added observation backend request metadata and fallback-chain reporting.
+- Added native CDP Accessibility tree observation capture with `Accessibility.getFullAXTree`.
+- Added native Playwright ARIA/AI snapshot observation capture with fallback to DOM semantic extraction.
+- Added observation evidence summaries to every report.
 - Added rule catalog APIs with `listRules()` and `getRule()`.
 - Added rule severity overrides and suppressions in config.
 - Added config validation for task names, backend names, and rule IDs.
-- Added score/report metadata versioning.
+- Added score/report metadata versioning and trend-friendly report fields.
 - Added task probes for `auth_form`, `form`, `form_validation`, `modal`, `menu`, `filter`, `pagination`, `download`, and `table`.
-- Added additional rules for action target identity, low-confidence actions, duplicate locator fingerprints, missing heading context, skipped probes, modal dismiss actions, and prompt-injection-like page text.
-- Added Playwright context options for headers, storageState, and viewport.
+- Added additional rules for action target identity, low-confidence actions, duplicate locator fingerprints, missing heading context, skipped probes, modal dismiss actions, prompt-injection-like page text, and potential sensitive text in report artifacts.
+- Added Playwright context options for headers, storageState, cookies, viewport, device scale factor, user agent, locale, timezone, color scheme, reduced motion, base URL, trace, screenshot capture, include selectors, and exclude selectors.
 - Added SARIF and JUnit report formatters.
-- Added `defineConfig()` and `auditProject()` Node APIs.
-- Added CLI commands: `init`, `rules`, `explain`, and `report`.
-- Added CLI flags: `--backend`, `--artifact-dir`, `--storage-state`, `--sarif`, and `--junit`.
+- Added `defineConfig()`, `auditProject()`, `hasBlockingIssues()`, `writeAuditReports()`, `diffAuditReports()`, and `validateConfig()` Node APIs.
+- Added cancellation support through `AbortSignal` and progress/event callbacks.
+- Added replay evidence with state IDs, DOM delta summaries, network summaries, console summaries, and per-probe timings.
+- Added CLI commands: `init`, `rules`, `explain`, `report`, `diff`, and `validate-config`.
+- Added CLI flags: `--backend`, `--target`, `--artifact-dir`, `--storage-state`, `--header`, `--viewport`, `--sarif`, `--junit`, and `--open`.
 - Expanded package documentation for scores, caught issues, current limitations, multi-target Node API, and CI-oriented outputs.
+- Added first-party GitHub Action wrapper, GitHub Actions copy-paste example, sample config, sample report artifact, and release checklist.
 
 ## Audit Coverage
 

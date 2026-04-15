@@ -1,0 +1,38 @@
+name: Agentability Audit
+description: Audit whether a web page exposes structured semantics, actions, and state feedback for trusted AI agents.
+
+inputs:
+  target:
+    description: URL to audit.
+    required: true
+  task:
+    description: Comma-separated task probes.
+    required: false
+    default: page
+  fail-below:
+    description: Minimum overall score.
+    required: false
+    default: "80"
+  report-dir:
+    description: Directory for JSON, HTML, Markdown, SARIF, JUnit, and replay artifacts.
+    required: false
+    default: reports/agentability
+  package-version:
+    description: agentability-audit package version or dist tag.
+    required: false
+    default: latest
+
+runs:
+  using: composite
+  steps:
+    - name: Install Playwright Chromium
+      shell: bash
+      run: npx playwright install --with-deps chromium
+
+    - name: Run Agentability Audit
+      shell: bash
+      run: |
+        npx agentability-audit@${{ inputs.package-version }} audit "${{ inputs.target }}" \
+          --task "${{ inputs.task }}" \
+          --fail-below "${{ inputs.fail-below }}" \
+          --artifact-dir "${{ inputs.report-dir }}"

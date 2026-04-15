@@ -30,11 +30,21 @@ Write reports:
 ```bash
 npx agentability audit http://localhost:3000 \
   --task page,search,auth_form,modal,filter,pagination \
+  --backend auto \
+  --viewport 1280x900 \
+  --header "X-Agentability: audit" \
   --out reports/agentability.json \
   --html reports/agentability.html \
   --markdown reports/agentability.md \
   --sarif reports/agentability.sarif \
-  --junit reports/agentability.junit.xml
+  --junit reports/agentability.junit.xml \
+  --open
+```
+
+Write a complete artifact set with one flag:
+
+```bash
+npx agentability audit http://localhost:3000 --task page,search --artifact-dir reports/agentability
 ```
 
 Explore rules and render reports:
@@ -44,6 +54,8 @@ npx agentability init
 npx agentability rules
 npx agentability explain actionability/duplicate-button-labels
 npx agentability report reports/agentability.json --html reports/agentability.html
+npx agentability diff reports/base.json reports/head.json
+npx agentability validate-config
 ```
 
 Use a config file:
@@ -57,6 +69,15 @@ export default {
   failBelow: 80,
   storageState: "playwright/.auth/user.json",
   viewport: { width: 1280, height: 900 },
+  deviceScaleFactor: 1,
+  userAgent: "agentability-audit",
+  locale: "en-US",
+  timezoneId: "America/Vancouver",
+  colorScheme: "light",
+  reducedMotion: "no-preference",
+  include: [],
+  exclude: ["footer", "[aria-hidden='true']", "[data-agentability-ignore]"],
+  retries: 1,
   output: {
     json: "reports/agentability.json",
     html: "reports/agentability.html",
@@ -72,15 +93,24 @@ export default {
 };
 ```
 
+Named targets are supported through config:
+
+```bash
+npx agentability audit --target search
+```
+
 ## Node API
 
 ```ts
-import { auditUrl } from "agentability-audit";
+import { auditUrl, hasBlockingIssues, writeAuditReports } from "agentability-audit";
 
 const report = await auditUrl("http://localhost:3000", {
   tasks: ["page", "search"],
   searchQuery: "Richmond ramen",
   observationBackend: "auto",
+  onEvent(event) {
+    console.log(event.type, event.task ?? "", event.message ?? "");
+  },
   rules: {
     severity: {
       "agent_safety/prompt-injection-like-text": "high"
@@ -89,6 +119,8 @@ const report = await auditUrl("http://localhost:3000", {
 });
 
 console.log(report.scores.overall);
+await writeAuditReports(report, { artifactDir: "reports/agentability" });
+process.exitCode = hasBlockingIssues(report, 80) ? 1 : 0;
 ```
 
 Use an existing Playwright page:
@@ -138,7 +170,7 @@ console.log(result.summary.averageScore);
 
 ## What This Does Not Catch Yet
 
-- Full CDP Accessibility tree parity. The current implementation records requested backend and fallback chain, then uses the DOM semantic backend.
+- Full parity with every browser assistant snapshot format. The package now captures CDP Accessibility tree and Playwright ARIA/AI snapshot evidence when available, then falls back to DOM semantic extraction.
 - Deep visual layout, canvas semantics, and image-only content.
 - Full checkout or destructive-action execution without user-provided safe fixtures.
 - Attempts to bypass sites that intentionally block automation.
@@ -155,4 +187,70 @@ await auditUrl("http://localhost:3000", {
 
 ## Current Scope
 
-The current execution backend is Playwright-controlled Chromium. The current observation implementation is `dom_semantic`: structured state derived from visible DOM, ARIA labels, controls, headings, links, forms, inferred action graph, and intent regions. `auto`, `cdp_ax_tree`, and `playwright_aria` are accepted as requested backends and reported with a fallback chain; CDP Accessibility tree and Playwright ARIA/AI snapshot extraction still need native extraction implementations.
+The current execution backend is Playwright-controlled Chromium. Observation can use `auto`, `cdp_ax_tree`, `playwright_aria`, or `dom_semantic`. Reports record the requested backend, selected backend, fallback chain, and a compact observation evidence summary. Structured state is still normalized into semantic elements, action graph, intent regions, state IDs, and task replay evidence.
+
+## Read Your First Report
+
+- Start with `scores.overall`; use `--fail-below 80` as a CI gate.
+- Review `issues` in severity order. Each issue has a stable `ruleId`, category, evidence, and recommendation.
+- Check `observations` to confirm whether the run used native CDP Accessibility, Playwright ARIA/AI snapshot, or DOM semantic fallback.
+- Check `replay.steps` for task evidence: state IDs before/after, DOM delta summary, network summary, console summary, and duration.
+- Use the HTML report for product review and SARIF/JUnit for CI systems.
+
+## CI Examples
+
+GitHub Actions:
+
+```yaml
+- run: npx playwright install --with-deps chromium
+- run: npm run preview -- --host 127.0.0.1 --port 4173 &
+- run: npx wait-on http://127.0.0.1:4173
+- run: npx agentability audit http://127.0.0.1:4173 --task page,search --fail-below 80 --artifact-dir reports/agentability
+```
+
+Vercel or Netlify preview:
+
+```bash
+npx agentability audit "$DEPLOY_PRIME_URL" --task page,form,modal --fail-below 80 --artifact-dir reports/agentability
+```
+
+Generic npm script:
+
+```json
+{
+  "scripts": {
+    "agentability": "agentability audit http://localhost:3000 --task page,search --fail-below 80 --artifact-dir reports/agentability"
+  }
+}
+```
+
+## Local Preview Examples
+
+Next.js:
+
+```bash
+npm run build
+npm run start &
+npx agentability audit http://localhost:3000 --task page,form
+```
+
+Vite:
+
+```bash
+npm run build
+npm run preview -- --host 127.0.0.1 --port 4173 &
+npx agentability audit http://127.0.0.1:4173 --task page,search
+```
+
+## Troubleshooting
+
+- Playwright browser missing: run `npx playwright install chromium`.
+- Blocked public sites: audit owned, staging, internal, or consent-based agent-friendly apps. This package does not bypass bot protection.
+- Authenticated pages: use `storageState`, configured cookies, or an authenticated preview environment.
+- Timeouts: increase `--timeout`, check your local preview server, and use `--header` if the preview needs a routing hint.
+- Noisy footer/ads/decorative areas: use `exclude` selectors or `data-agentability-ignore`.
+- Sensitive reports: configure `redact` patterns and avoid uploading authenticated artifacts publicly.
+
+## Release And Scoring Notes
+
+Reports include `metadata.reportVersion` and `metadata.scoreModelVersion`. Treat rule additions, severity changes, and score weighting changes as changelog-worthy release notes. See `docs/release-checklist.md` in the repository for publish checks.

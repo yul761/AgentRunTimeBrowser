@@ -18,6 +18,7 @@ npx playwright install chromium
 npx agentability audit http://localhost:3000 --task page,search --fail-below 80
 npx agentability rules
 npx agentability explain actionability/duplicate-button-labels
+npx agentability diff reports/base.json reports/head.json
 ```
 
 As this repo:
@@ -35,6 +36,8 @@ The audit command opens the page in Chromium, extracts structured browser state,
 - Recoverability score.
 - Agent safety score.
 - Task probe results.
+- Native observation evidence from CDP Accessibility, Playwright ARIA/AI snapshot, or DOM semantic fallback.
+- Replay evidence with state IDs, DOM deltas, network summaries, console summaries, and timings.
 - Prioritized issues with evidence and repair guidance.
 
 Example output:
@@ -151,7 +154,22 @@ pnpm agentability audit ./baseline/search-fixture.html \
   --html benchmark-results/audit-fixture.html \
   --markdown benchmark-results/audit-fixture.md \
   --sarif benchmark-results/audit-fixture.sarif \
-  --junit benchmark-results/audit-fixture.junit.xml
+  --junit benchmark-results/audit-fixture.junit.xml \
+  --open
+```
+
+Write a complete artifact directory:
+
+```bash
+pnpm agentability audit ./baseline/search-fixture.html \
+  --task page,search \
+  --artifact-dir benchmark-results/agentability
+```
+
+Use a named config target:
+
+```bash
+pnpm agentability audit --target local --config examples/agentability.config.mjs
 ```
 
 Use it as a CI gate:
@@ -168,7 +186,8 @@ import { auditUrl } from "agentability-audit";
 const report = await auditUrl("http://localhost:3000", {
   tasks: ["page", "search"],
   searchQuery: "Richmond ramen",
-  observationBackend: "auto"
+  observationBackend: "auto",
+  exclude: ["footer", "[data-agentability-ignore]"]
 });
 ```
 
@@ -194,6 +213,17 @@ Current package commands:
 - `agentability rules`: list rule metadata.
 - `agentability explain <ruleId>`: explain a rule and its fix.
 - `agentability report <json>`: render an existing JSON report.
+- `agentability diff <base-json> <head-json>`: compare two audit reports.
+- `agentability validate-config`: validate config before CI runs.
+
+Useful flags:
+
+- `--backend auto|cdp_ax_tree|playwright_aria|dom_semantic`
+- `--target <name>` for config targets
+- `--header "Name: value"` for previews and internal apps
+- `--viewport 1280x900`
+- `--artifact-dir reports/agentability`
+- `--open` for generated HTML reports
 
 Current MVP scoring dimensions:
 
@@ -202,6 +232,12 @@ Current MVP scoring dimensions:
 - `stateFeedback`: task probes can observe useful URL, title, text, or region changes after actions.
 - `recoverability`: exposed elements have semantic IDs, locator fingerprints, and lineage.
 - `agentSafety`: paid or risky content should be distinguishable from primary task content.
+
+Report evidence now includes:
+
+- `observations`: selected native observation backend and compact evidence summary.
+- `replay.steps`: deterministic task replay data with before/after state IDs.
+- `trend`: dashboard-friendly score, issue count, severity count, and probe status count.
 
 ## Optional Probe Inspection Tools
 

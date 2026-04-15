@@ -1,0 +1,35 @@
+name: Agentability Audit
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+
+      # Replace this with your app's preview/start command.
+      - run: npm run build
+      - run: npm run preview -- --host 127.0.0.1 --port 4173 &
+      - run: npx wait-on http://127.0.0.1:4173
+
+      - run: |
+          npx agentability audit http://127.0.0.1:4173 \
+            --task page,search \
+            --fail-below 80 \
+            --artifact-dir reports/agentability
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: agentability-report
+          path: reports/agentability
