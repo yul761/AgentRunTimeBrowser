@@ -5,6 +5,7 @@ export function formatTextReport(report: AuditReport): string {
     `Agentability audit for ${report.finalUrl}`,
     `Title: ${report.title || "not available"}`,
     `Overall score: ${report.scores.overall}/100`,
+    `Observation backend: ${report.metadata.observationBackend} (requested ${report.metadata.requestedObservationBackend})`,
     "",
     "Scores:",
     `- semantic: ${report.scores.semanticDiscoverability}`,
@@ -15,6 +16,9 @@ export function formatTextReport(report: AuditReport): string {
     "",
     "Task probes:",
     ...formatProbeLines(report),
+    "",
+    "Observation evidence:",
+    ...formatObservationLines(report),
     "",
     "Issues:",
     ...formatIssueLines(report.issues)
@@ -38,6 +42,7 @@ export function formatMarkdownReport(report: AuditReport): string {
     "",
     `**URL:** ${report.finalUrl}`,
     `**Overall score:** ${report.scores.overall}/100`,
+    `**Observation backend:** ${report.metadata.observationBackend} (requested ${report.metadata.requestedObservationBackend})`,
     "",
     "## Scores",
     "",
@@ -54,6 +59,14 @@ export function formatMarkdownReport(report: AuditReport): string {
     "| Task | Status | Steps | Evidence |",
     "| --- | --- | ---: | --- |",
     ...(probeRows.length > 0 ? probeRows : ["| none | skipped | 0 | |"]),
+    "",
+    "## Observation Evidence",
+    "",
+    "| Backend | Status | Summary |",
+    "| --- | --- | --- |",
+    ...(report.observations.length > 0
+      ? report.observations.map((observation) => `| ${observation.backend} | ${observation.status} | ${escapeMarkdownTable(JSON.stringify(observation.summary))} |`)
+      : ["| none | skipped | |"]),
     "",
     "## Issues",
     "",
@@ -81,7 +94,33 @@ export function formatHtmlReport(report: AuditReport): string {
       (probe) => `<li>
         <strong>${escapeHtml(probe.task)}</strong>: ${escapeHtml(probe.status)}
         <span>${escapeHtml(probe.observedEffects.join(", ") || probe.error || "")}</span>
+        ${probe.durationMs !== undefined ? `<small>${probe.durationMs} ms</small>` : ""}
       </li>`
+    )
+    .join("\n");
+  const observations = report.observations
+    .map(
+      (observation) => `<details>
+        <summary>${escapeHtml(observation.backend)}: ${escapeHtml(observation.status)}</summary>
+        <pre>${escapeHtml(JSON.stringify(observation.summary, null, 2))}</pre>
+        ${observation.error ? `<p>${escapeHtml(observation.error)}</p>` : ""}
+      </details>`
+    )
+    .join("\n");
+  const replay = report.replay.steps
+    .map(
+      (step) => `<details>
+        <summary>${escapeHtml(step.task)}: ${escapeHtml(step.status)} (${step.durationMs} ms)</summary>
+        <pre>${escapeHtml(JSON.stringify({
+          beforeStateId: step.beforeStateId,
+          afterStateId: step.afterStateId,
+          observedEffects: step.observedEffects,
+          domDeltaSummary: step.domDeltaSummary,
+          networkSummary: step.networkSummary,
+          consoleSummary: step.consoleSummary,
+          error: step.error
+        }, null, 2))}</pre>
+      </details>`
     )
     .join("\n");
 
@@ -96,6 +135,9 @@ export function formatHtmlReport(report: AuditReport): string {
       .score { font-size: 48px; font-weight: 700; margin: 12px 0; }
       .scores { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; padding: 0; }
       .scores li, .issue, .probe { border: 1px solid #d8dee4; border-radius: 8px; padding: 12px; list-style: none; }
+      details { border: 1px solid #d8dee4; border-radius: 8px; margin: 10px 0; padding: 10px 12px; }
+      summary { cursor: pointer; font-weight: 700; }
+      pre { background: #f6f8fa; border-radius: 8px; overflow: auto; padding: 12px; }
       .issue span { display: block; color: #5f6b76; margin: 4px 0; }
       .high { border-left: 6px solid #b42318; }
       .medium { border-left: 6px solid #b54708; }
@@ -109,6 +151,7 @@ export function formatHtmlReport(report: AuditReport): string {
       <h1>Agentability Audit Report</h1>
       <p><code>${escapeHtml(report.finalUrl)}</code></p>
       <div class="score">${report.scores.overall}/100</div>
+      <p>Backend: <strong>${escapeHtml(report.metadata.observationBackend)}</strong> requested as <code>${escapeHtml(report.metadata.requestedObservationBackend)}</code></p>
       <h2>Scores</h2>
       <ul class="scores">
         <li>Semantic discoverability<br /><strong>${report.scores.semanticDiscoverability}</strong></li>
@@ -119,6 +162,10 @@ export function formatHtmlReport(report: AuditReport): string {
       </ul>
       <h2>Task Probes</h2>
       <ul class="probe">${probes || "<li>No probes ran.</li>"}</ul>
+      <h2>Observation Evidence</h2>
+      ${observations || "<p>No observation evidence.</p>"}
+      <h2>Replay</h2>
+      ${replay || "<p>No replay steps.</p>"}
       <h2>Issues</h2>
       <ul>${issueItems || "<li>No issues detected.</li>"}</ul>
     </main>
@@ -201,7 +248,18 @@ function formatProbeLines(report: AuditReport): string[] {
   return report.taskProbes.map((probe) => {
     const effects = probe.observedEffects.length > 0 ? ` effects=${probe.observedEffects.join(",")}` : "";
     const error = probe.error ? ` error=${probe.error}` : "";
-    return `- ${probe.task}: ${probe.status} steps=${probe.steps}${effects}${error}`;
+    const duration = probe.durationMs !== undefined ? ` durationMs=${probe.durationMs}` : "";
+    return `- ${probe.task}: ${probe.status} steps=${probe.steps}${duration}${effects}${error}`;
+  });
+}
+
+function formatObservationLines(report: AuditReport): string[] {
+  if (report.observations.length === 0) {
+    return ["- none"];
+  }
+  return report.observations.map((observation) => {
+    const error = observation.error ? ` error=${observation.error}` : "";
+    return `- ${observation.backend}: ${observation.status}${error}`;
   });
 }
 

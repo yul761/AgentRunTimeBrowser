@@ -7,8 +7,11 @@ export interface RuleMetadata {
   defaultSeverity: AuditSeverity;
   title: string;
   rationale: string;
+  examples: string[];
   recommendation: string;
 }
+
+type RuleDefinition = Omit<RuleMetadata, "examples"> & { examples?: string[] };
 
 export const RULES = [
   {
@@ -163,13 +166,30 @@ export const RULES = [
     title: "Page text contains agent-instruction language",
     rationale: "Text that asks agents to ignore instructions can be unsafe in agent workflows.",
     recommendation: "Keep agent-directed instructions out of user-visible page content or mark them as untrusted content."
+  },
+  {
+    id: "potential-pii-in-report",
+    ruleId: "agent_safety/potential-pii-in-report",
+    category: "agent_safety",
+    defaultSeverity: "medium",
+    title: "Reports may contain sensitive visible text",
+    rationale: "Audit artifacts are useful for teams, but visible page text can include user data or secrets.",
+    recommendation: "Configure redact patterns and avoid writing public artifacts for sensitive authenticated pages."
   }
-] satisfies RuleMetadata[];
+] satisfies RuleDefinition[];
 
 export function listRules(): RuleMetadata[] {
-  return [...RULES];
+  return RULES.map(normalizeRuleMetadata);
 }
 
 export function getRule(ruleIdOrId: string): RuleMetadata | undefined {
-  return RULES.find((rule) => rule.ruleId === ruleIdOrId || rule.id === ruleIdOrId);
+  const rule = RULES.find((candidate) => candidate.ruleId === ruleIdOrId || candidate.id === ruleIdOrId);
+  return rule ? normalizeRuleMetadata(rule) : undefined;
+}
+
+function normalizeRuleMetadata(rule: RuleDefinition): RuleMetadata {
+  return {
+    ...rule,
+    examples: rule.examples ?? [`Example: ${rule.rationale}`]
+  };
 }

@@ -55,7 +55,9 @@
   "scripts": {
     "build": "tsup",
     "prepack": "tsup",
+    "prepublishOnly": "pnpm typecheck && pnpm test && pnpm build && npm pack --dry-run",
     "pack:dry": "npm pack --dry-run",
+    "size": "npm pack --dry-run",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

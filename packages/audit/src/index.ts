@@ -1,6 +1,9 @@
+import { mkdir, writeFile } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
 import { buildStructuredStateFromDocument } from "@arb/browser-driver";
 import { computeStateDelta } from "@arb/core";
-import { chromium, type Page } from "playwright";
+import { chromium, type BrowserContext, type Page } from "playwright";
+import { formatHtmlReport, formatJunitReport, formatMarkdownReport, formatSarifReport } from "./reporters";
 import { getRule, listRules, type RuleMetadata } from "./rules";
 
 export { loadAuditConfig } from "./config";
@@ -29,6 +32,105 @@ export type AuditCategory =
 export type ObservationBackend = "auto" | "cdp_ax_tree" | "playwright_aria" | "dom_semantic";
 
 export type RuleSeverityOverride = AuditSeverity | "off";
+export type AuditColorScheme = "light" | "dark" | "no-preference";
+export type AuditReducedMotion = "reduce" | "no-preference";
+
+export interface AuditCookie {
+  name: string;
+  value: string;
+  url?: string;
+  domain?: string;
+  path?: string;
+  expires?: number;
+  httpOnly?: boolean;
+  secure?: boolean;
+  sameSite?: "Strict" | "Lax" | "None";
+}
+
+export interface AuditEvent {
+  type: "audit:start" | "audit:observation" | "audit:state" | "probe:start" | "probe:end" | "audit:end";
+  timestamp: string;
+  url?: string;
+  task?: AuditTask;
+  message?: string;
+  data?: Record<string, unknown>;
+}
+
+export interface ObservationSnapshot {
+  backend: ObservationBackend;
+  status: "captured" | "failed" | "fallback";
+  capturedAt: string;
+  summary: Record<string, unknown>;
+  error?: string;
+}
+
+export interface AuditNetworkSummary {
+  requests: number;
+  failedRequests: number;
+  statusCodes: Record<string, number>;
+  sampledUrls: string[];
+}
+
+export interface AuditConsoleSummary {
+  messages: number;
+  errors: number;
+  warnings: number;
+  samples: string[];
+}
+
+export interface AuditRuntimeSummary {
+  network: AuditNetworkSummary;
+  console: AuditConsoleSummary;
+}
+
+export interface AuditReplayStep {
+  task: AuditTask;
+  status: "passed" | "failed" | "skipped";
+  startedAt: string;
+  finishedAt: string;
+  durationMs: number;
+  beforeStateId: string;
+  afterStateId: string;
+  observedEffects: string[];
+  domDeltaSummary: Record<string, unknown>;
+  networkSummary?: AuditNetworkSummary;
+  consoleSummary?: AuditConsoleSummary;
+  error: string | null;
+}
+
+export interface AuditReportOutputs {
+  json?: string;
+  html?: string;
+  markdown?: string;
+  sarif?: string;
+  junit?: string;
+  artifactDir?: string;
+}
+
+export interface AuditWriteResult {
+  files: Record<string, string>;
+}
+
+export interface AuditReportDiff {
+  baseReportId: string;
+  headReportId: string;
+  scoreDelta: number;
+  issueDelta: number;
+  addedIssues: AuditIssue[];
+  removedIssues: AuditIssue[];
+  changedSeverities: Array<{
+    ruleId: string;
+    title: string;
+    from: AuditSeverity;
+    to: AuditSeverity;
+  }>;
+  summary: {
+    baseScore: number;
+    headScore: number;
+    baseIssues: number;
+    headIssues: number;
+  };
+}
 
 export interface RuleConfig {
   severity?: Record<string, RuleSeverityOverride>;
@@ -45,11 +147,28 @@ export interface AuditOptions {
   rules?: RuleConfig;
   artifactDir?: string;
   headers?: Record<string, string>;
+  extraHTTPHeaders?: Record<string, string>;
+  cookies?: AuditCookie[];
   storageState?: string;
   viewport?: {
     width: number;
     height: number;
   };
+  deviceScaleFactor?: number;
+  userAgent?: string;
+  locale?: string;
+  timezoneId?: string;
+  colorScheme?: AuditColorScheme;
+  reducedMotion?: AuditReducedMotion;
+  baseURL?: string;
+  include?: string[];
+  exclude?: string[];
+  retries?: number;
+  concurrency?: number;
+  trace?: boolean;
+  screenshot?: boolean;
+  signal?: AbortSignal;
+  onEvent?: (event: AuditEvent) => void;
 }
 
 export interface AuditConfig extends AuditOptions {
@@ -99,6 +218,11 @@ export interface AuditTaskProbe {
   observedEffects: string[];
   error: string | null;
   evidence?: Record<string, unknown>;
+  startedAt?: string;
+  finishedAt?: string;
+  durationMs?: number;
+  networkSummary?: AuditNetworkSummary;
+  consoleSummary?: AuditConsoleSummary;
 }
 
 export interface SemanticIdentity {
@@ -211,16 +335,36 @@ export interface AuditReport {
   scores: AuditScores;
   issues: AuditIssue[];
   taskProbes: AuditTaskProbe[];
+  observations: ObservationSnapshot[];
+  replay: {
+    steps: AuditReplayStep[];
+  };
+  trend: {
+    score: number;
+    issueCount: number;
+    issueCountsBySeverity: Record<AuditSeverity, number>;
+    probeStatusCounts: Record<AuditTaskProbe["status"], number>;
+  };
   state: StructuredState;
   metadata: {
     packageName: "agentability-audit";
-    reportVersion: "0.2";
-    scoreModelVersion: "0.2";
+    reportVersion: "0.3";
+    scoreModelVersion: "0.3";
     observationBackend: ObservationBackend;
     requestedObservationBackend: ObservationBackend;
     fallbackChain: ObservationBackend[];
     localOnly: true;
     artifactDir?: string;
+    support: {
+      structuredState: true;
+      actionGraph: true;
+      stateDelta: true;
+      preview: "human_review_only";
+      download: "safe_capture_probe";
+      frame: "partial";
+      shadowDom: "partial";
+      canvasSemantic: "unsupported";
+    };
   };
 }
 
@@ -248,6 +392,8 @@ export interface AuditBrowserDriver {
   getCurrentUrl(): Promise<string>;
   getTitle(): Promise<string>;
   getLogs(): string[];
+  getObservationSnapshots?(backend: ObservationBackend): Promise<ObservationSnapshot[]>;
+  getRuntimeSummary?(): AuditRuntimeSummary;
   close(): Promise<void>;
 }
 
@@ -268,7 +414,7 @@ interface InternalIssueInput {
 
 type NormalizedAuditOptions = Required<
   Pick<AuditOptions, "tasks" | "searchQuery" | "timeoutMs" | "redact" | "maxTextLength" | "observationBackend" | "rules">
-> & Pick<AuditOptions, "artifactDir">;
+> & Pick<AuditOptions, "artifactDir" | "include" | "exclude" | "retries" | "signal" | "onEvent">;
 
 export class AgentabilityAuditor {
   private readonly driverFactory?: BrowserDriverFactory;
@@ -303,8 +449,9 @@ export async function auditHtml(html: string, options: AuditOptions = {}): Promi
       waitUntil: "domcontentloaded",
       timeout: options.timeoutMs ?? 30000
     });
-    return await auditDriver(new PlaywrightPageAuditDriver(page), "about:blank#agentability-html", options);
+    return await auditDriver(new PlaywrightPageAuditDriver(page, stateExtractionOptions(options)), "about:blank#agentability-html", options);
   } finally {
+    await stopTraceIfRequested(context, options, "agentability-html");
     await context.close().catch(() => undefined);
     await browser.close().catch(() => undefined);
   }
@@ -314,10 +461,11 @@ async function auditUrlWithOwnedPage(url: string, options: AuditOptions): Promis
   const { browser, context } = await createAuditBrowserContext(options);
   const page = await context.newPage();
   try {
-    const driver = new PlaywrightPageAuditDriver(page);
+    const driver = new PlaywrightPageAuditDriver(page, stateExtractionOptions(options));
     await driver.openPage(url, { waitUntil: "domcontentloaded", timeoutMs: options.timeoutMs ?? 30000 });
     return await auditDriver(driver, url, options);
   } finally {
+    await stopTraceIfRequested(context, options, "agentability-url");
     await context.close().catch(() => undefined);
     await browser.close().catch(() => undefined);
   }
@@ -329,15 +477,52 @@ async function createAuditBrowserContext(options: AuditOptions) {
   });
   const context = await browser.newContext({
     viewport: options.viewport ?? { width: 1280, height: 900 },
-    extraHTTPHeaders: options.headers,
+    deviceScaleFactor: options.deviceScaleFactor,
+    userAgent: options.userAgent,
+    locale: options.locale,
+    timezoneId: options.timezoneId,
+    colorScheme: options.colorScheme,
+    reducedMotion: options.reducedMotion,
+    baseURL: options.baseURL,
+    extraHTTPHeaders: options.extraHTTPHeaders ?? options.headers,
     storageState: options.storageState
   });
+  if (options.cookies && options.cookies.length > 0) {
+    await context.addCookies(options.cookies);
+  }
+  if (options.trace) {
+    await context.tracing.start({
+      screenshots: options.screenshot ?? false,
+      snapshots: true,
+      sources: true
+    });
+  }
   return { browser, context };
 }
 
 export async function auditPage(page: Page, options: AuditOptions = {}): Promise<AuditReport> {
-  const driver = new PlaywrightPageAuditDriver(page);
+  const driver = new PlaywrightPageAuditDriver(page, stateExtractionOptions(options));
   return auditDriver(driver, page.url(), options);
+}
+
+function stateExtractionOptions(options: AuditOptions): StateExtractionOptions {
+  return {
+    include: options.include,
+    exclude: options.exclude
+  };
+}
+
+async function stopTraceIfRequested(context: BrowserContext, options: AuditOptions, name: string): Promise<void> {
+  if (!options.trace) {
+    return;
+  }
+  if (!options.artifactDir) {
+    await context.tracing.stop().catch(() => undefined);
+    return;
+  }
+  const tracePath = resolve(process.cwd(), options.artifactDir, `${name}-${Date.now()}.zip`);
+  await mkdir(dirname(tracePath), { recursive: true });
+  await context.tracing.stop({ path: tracePath }).catch(() => undefined);
 }
 
 export function defineConfig(config: AuditConfig): AuditConfig {
@@ -374,15 +559,77 @@ export async function auditProject(config: AuditConfig): Promise<AuditProjectRes
   };
 }
 
+export function hasBlockingIssues(report: AuditReport, minimumScore = 80): boolean {
+  return report.scores.overall < minimumScore || report.issues.some((issueItem) => issueItem.severity === "high");
+}
+
+export async function writeAuditReports(report: AuditReport, outputs: AuditReportOutputs): Promise<AuditWriteResult> {
+  const resolvedOutputs = resolveReportOutputs(report, outputs);
+  const files: Record<string, string> = {};
+  for (const [kind, outputPath] of Object.entries(resolvedOutputs)) {
+    if (!outputPath) {
+      continue;
+    }
+    const absolutePath = resolve(process.cwd(), outputPath);
+    await mkdir(dirname(absolutePath), { recursive: true });
+    await writeFile(absolutePath, renderReportOutput(kind, report), "utf8");
+    files[kind] = absolutePath;
+  }
+  return { files };
+}
+
+export function diffAuditReports(base: AuditReport, head: AuditReport): AuditReportDiff {
+  const baseIssues = new Map(base.issues.map((issueItem) => [issueKey(issueItem), issueItem]));
+  const headIssues = new Map(head.issues.map((issueItem) => [issueKey(issueItem), issueItem]));
+  const addedIssues = head.issues.filter((issueItem) => !baseIssues.has(issueKey(issueItem)));
+  const removedIssues = base.issues.filter((issueItem) => !headIssues.has(issueKey(issueItem)));
+  const changedSeverities = head.issues.flatMap((headIssue) => {
+    const baseIssue = baseIssues.get(issueKey(headIssue));
+    if (!baseIssue || baseIssue.severity === headIssue.severity) {
+      return [];
+    }
+    return [{
+      ruleId: headIssue.ruleId,
+      title: headIssue.title,
+      from: baseIssue.severity,
+      to: headIssue.severity
+    }];
+  });
+  return {
+    baseReportId: base.reportId,
+    headReportId: head.reportId,
+    scoreDelta: head.scores.overall - base.scores.overall,
+    issueDelta: head.issues.length - base.issues.length,
+    addedIssues,
+    removedIssues,
+    changedSeverities,
+    summary: {
+      baseScore: base.scores.overall,
+      headScore: head.scores.overall,
+      baseIssues: base.issues.length,
+      headIssues: head.issues.length
+    }
+  };
+}
+
+export function validateConfig(config: AuditConfig): AuditConfig {
+  validateAuditConfig(config);
+  return config;
+}
+
 export function normalizeAuditOptions(options: AuditOptions = {}): NormalizedAuditOptions {
   const timeoutMs = options.timeoutMs ?? 30000;
   const maxTextLength = options.maxTextLength ?? 12000;
   const rules = options.rules ?? {};
+  const retries = options.retries ?? 1;
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
     throw new Error(`Invalid timeoutMs: ${options.timeoutMs}`);
   }
   if (!Number.isFinite(maxTextLength) || maxTextLength <= 0) {
     throw new Error(`Invalid maxTextLength: ${options.maxTextLength}`);
+  }
+  if (!Number.isInteger(retries) || retries < 0) {
+    throw new Error(`Invalid retries: ${options.retries}`);
   }
   validateRuleConfig(rules);
   return {
@@ -393,45 +640,135 @@ export function normalizeAuditOptions(options: AuditOptions = {}): NormalizedAud
     maxTextLength,
     observationBackend: normalizeObservationBackend(options.observationBackend),
     rules,
-    artifactDir: options.artifactDir
+    artifactDir: options.artifactDir,
+    include: options.include,
+    exclude: options.exclude,
+    retries,
+    signal: options.signal,
+    onEvent: options.onEvent
   };
 }
 
 async function auditDriver(driver: AuditBrowserDriver, url: string, options: AuditOptions): Promise<AuditReport> {
   const normalized = normalizeAuditOptions(options);
   const taskProbes: AuditTaskProbe[] = [];
-  const selectedBackend = selectedObservationBackend(normalized.observationBackend);
-  const initialRawState = await driver.getStructuredState();
-  const initialState = redactState(initialRawState, normalized);
+  const replaySteps: AuditReplayStep[] = [];
+  emitAuditEvent(normalized, "audit:start", { url, message: "Starting agentability audit" });
+  checkAbort(normalized);
+  const observations = redactObservationSnapshots(
+    await collectObservationSnapshots(driver, normalized.observationBackend),
+    normalized.redact
+  );
+  emitAuditEvent(normalized, "audit:observation", {
+    url,
+    message: "Captured observation backend evidence",
+    data: { observations: observations.map((observation) => ({ backend: observation.backend, status: observation.status })) }
+  });
+  const selectedBackend = selectedObservationBackend(observations, normalized.observationBackend);
 
   for (const task of normalized.tasks) {
-    taskProbes.push(await runTaskProbe(task, driver, initialRawState, normalized));
+    checkAbort(normalized);
+    const beforeState = await driver.getStructuredState();
+    const beforeRuntime = driver.getRuntimeSummary?.();
+    const startedAt = new Date().toISOString();
+    const startedMs = Date.now();
+    emitAuditEvent(normalized, "probe:start", { url: beforeState.url, task, message: `Starting ${task} probe` });
+    const probe = await runTaskProbeWithRetry(task, driver, beforeState, normalized);
+    const afterState = await driver.getStructuredState().catch(() => beforeState);
+    const afterRuntime = driver.getRuntimeSummary?.();
+    const finishedAt = new Date().toISOString();
+    const durationMs = Date.now() - startedMs;
+    const domDeltaSummary = summarizeStateDelta(task, beforeState, afterState);
+    const networkSummary = summarizeRuntimeDiff(beforeRuntime?.network, afterRuntime?.network);
+    const consoleSummary = summarizeConsoleDiff(beforeRuntime?.console, afterRuntime?.console);
+    const enrichedProbe: AuditTaskProbe = {
+      ...probe,
+      startedAt,
+      finishedAt,
+      durationMs,
+      networkSummary,
+      consoleSummary,
+      evidence: {
+        ...probe.evidence,
+        beforeStateId: beforeState.stateId,
+        afterStateId: afterState.stateId,
+        domDeltaSummary,
+        networkSummary,
+        consoleSummary
+      }
+    };
+    taskProbes.push(enrichedProbe);
+    replaySteps.push({
+      task,
+      status: enrichedProbe.status,
+      startedAt,
+      finishedAt,
+      durationMs,
+      beforeStateId: beforeState.stateId,
+      afterStateId: afterState.stateId,
+      observedEffects: enrichedProbe.observedEffects,
+      domDeltaSummary,
+      networkSummary,
+      consoleSummary,
+      error: enrichedProbe.error
+    });
+    emitAuditEvent(normalized, "probe:end", {
+      url: afterState.url,
+      task,
+      message: `Finished ${task} probe`,
+      data: { status: enrichedProbe.status, durationMs }
+    });
   }
 
-  const finalState = redactState(await driver.getStructuredState(), normalized);
-  const issues = applyRuleConfig(buildIssues(finalState, taskProbes), normalized.rules);
-
-  return {
+  checkAbort(normalized);
+  const finalRawState = await driver.getStructuredState();
+  const finalState = redactState(finalRawState, normalized);
+  emitAuditEvent(normalized, "audit:state", { url: finalState.url, message: "Captured final structured state" });
+  const issues = redactIssues(applyRuleConfig(buildIssues(finalRawState, taskProbes), normalized.rules), normalized.redact);
+  const scores = scoreReport(finalState, issues, taskProbes);
+  const report: AuditReport = {
     reportId: crypto.randomUUID(),
     url: redactText(url, normalized.redact),
     finalUrl: finalState.url,
     title: finalState.title,
     generatedAt: new Date().toISOString(),
-    scores: scoreReport(finalState, issues, taskProbes),
+    scores,
     issues,
     taskProbes,
+    observations,
+    replay: {
+      steps: replaySteps
+    },
+    trend: buildTrendSummary(scores, issues, taskProbes),
     state: finalState,
     metadata: {
       packageName: "agentability-audit",
-      reportVersion: "0.2",
-      scoreModelVersion: "0.2",
+      reportVersion: "0.3",
+      scoreModelVersion: "0.3",
       observationBackend: selectedBackend,
       requestedObservationBackend: normalized.observationBackend,
       fallbackChain: fallbackChainFor(normalized.observationBackend),
       localOnly: true,
-      artifactDir: normalized.artifactDir
+      artifactDir: normalized.artifactDir,
+      support: {
+        structuredState: true,
+        actionGraph: true,
+        stateDelta: true,
+        preview: "human_review_only",
+        download: "safe_capture_probe",
+        frame: "partial",
+        shadowDom: "partial",
+        canvasSemantic: "unsupported"
+      }
     }
   };
+  emitAuditEvent(normalized, "audit:end", {
+    url: report.finalUrl,
+    message: "Finished agentability audit",
+    data: { score: report.scores.overall, issues: report.issues.length }
+  });
+
+  return report;
 }
 
 async function runTaskProbe(
@@ -500,6 +837,33 @@ async function runTaskProbe(
         skipped: "No table-like structured context was found."
       });
   }
+}
+
+async function runTaskProbeWithRetry(
+  task: AuditTask,
+  driver: AuditBrowserDriver,
+  state: StructuredState,
+  options: NormalizedAuditOptions
+): Promise<AuditTaskProbe> {
+  let lastProbe: AuditTaskProbe | null = null;
+  const attempts = Math.max(1, options.retries ?? 1);
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    checkAbort(options);
+    const probe = await runTaskProbe(task, driver, state, options);
+    lastProbe = probe;
+    if (probe.status !== "failed" || attempt === attempts) {
+      return probe;
+    }
+    await driver.waitFor({ kind: "timeout", ms: Math.min(1000, 250 * attempt) }, 1500).catch(() => undefined);
+  }
+  return lastProbe ?? {
+    task,
+    status: "failed",
+    steps: 0,
+    observedEffects: [],
+    error: "Probe did not run.",
+    evidence: {}
+  };
 }
 
 function runPageProbe(state: StructuredState): AuditTaskProbe {
@@ -804,6 +1168,18 @@ function buildIssues(state: StructuredState, taskProbes: AuditTaskProbe[]): Audi
     }));
   }
 
+  const piiMatches = state.visibleTextSummary.filter((line) => containsPotentialSensitiveText(line));
+  if (piiMatches.length > 0) {
+    issues.push(issue("potential-pii-in-report", {
+      severity: "medium",
+      category: "agent_safety",
+      title: "Reports may contain sensitive visible text",
+      message: "Visible page text contains values that look like email addresses, tokens, secrets, or passwords.",
+      evidence: { matchedLineCount: piiMatches.length },
+      recommendation: "Use redact patterns, avoid exposing secrets in rendered pages, and keep generated reports out of public artifacts."
+    }));
+  }
+
   return issues;
 }
 
@@ -829,12 +1205,63 @@ function scoreReport(state: StructuredState, issues: AuditIssue[], taskProbes: A
   };
 }
 
+interface StateExtractionOptions {
+  include?: string[];
+  exclude?: string[];
+}
+
+interface RuntimeNetworkEvent {
+  url: string;
+  method: string;
+  status: number | null;
+  failed: boolean;
+  resourceType: string;
+  errorText?: string;
+}
+
+interface RuntimeConsoleEvent {
+  type: string;
+  text: string;
+  timestamp: string;
+}
+
 class PlaywrightPageAuditDriver implements AuditBrowserDriver {
   readonly sessionId = crypto.randomUUID();
   readonly pageId = crypto.randomUUID();
   private readonly logs: string[] = [];
+  private readonly networkEvents: RuntimeNetworkEvent[] = [];
+  private readonly consoleEvents: RuntimeConsoleEvent[] = [];
 
-  constructor(private readonly page: Page) {}
+  constructor(private readonly page: Page, private readonly stateOptions: StateExtractionOptions = {}) {
+    this.page.on("console", (message) => {
+      this.consoleEvents.push({
+        type: message.type(),
+        text: message.text().slice(0, 500),
+        timestamp: new Date().toISOString()
+      });
+    });
+    this.page.on("requestfinished", (request) => {
+      void request.response().then((response) => {
+        this.networkEvents.push({
+          url: sanitizeUrlForEvidence(request.url()),
+          method: request.method(),
+          status: response?.status() ?? null,
+          failed: false,
+          resourceType: request.resourceType()
+        });
+      }).catch(() => undefined);
+    });
+    this.page.on("requestfailed", (request) => {
+      this.networkEvents.push({
+        url: sanitizeUrlForEvidence(request.url()),
+        method: request.method(),
+        status: null,
+        failed: true,
+        resourceType: request.resourceType(),
+        errorText: request.failure()?.errorText
+      });
+    });
+  }
 
   async openPage(url: string, options: { waitUntil?: "load" | "domcontentloaded" | "networkidle"; timeoutMs?: number } = {}): Promise<void> {
     this.log(`navigate ${url}`);
@@ -912,18 +1339,100 @@ class PlaywrightPageAuditDriver implements AuditBrowserDriver {
   async getStructuredState(): Promise<StructuredState> {
     const source = buildStructuredStateFromDocument.toString();
     return this.page.evaluate(
-      ({ fnSource, meta }) => {
-        const build = new Function(`const __name = (fn) => fn; return (${fnSource})`)() as typeof buildStructuredStateFromDocument;
-        return build(document, meta);
+      ({ fnSource, meta, stateOptions }) => {
+        const build = new Function(`globalThis.__name = globalThis.__name ?? ((fn) => fn); return (${fnSource})`)() as typeof buildStructuredStateFromDocument;
+        const buildScopedDocument = (
+          sourceDocument: Document,
+          options: { include?: string[]; exclude?: string[] }
+        ): Document => {
+          const includeSelectors = options.include?.filter(Boolean) ?? [];
+          const excludeSelectors = options.exclude?.filter(Boolean) ?? [];
+          if (includeSelectors.length === 0 && excludeSelectors.length === 0) {
+            return sourceDocument;
+          }
+          const workingDocument = includeSelectors.length > 0
+            ? sourceDocument.implementation.createHTMLDocument(sourceDocument.title)
+            : sourceDocument.cloneNode(true) as Document;
+          try {
+            Object.defineProperty(workingDocument, "location", {
+              value: sourceDocument.location,
+              configurable: true
+            });
+          } catch {
+            // Some browser implementations keep Document.location non-configurable.
+          }
+          if (includeSelectors.length > 0) {
+            for (const selector of includeSelectors) {
+              for (const node of sourceDocument.querySelectorAll(selector)) {
+                workingDocument.body.appendChild(node.cloneNode(true));
+              }
+            }
+          }
+          for (const selector of excludeSelectors) {
+            for (const node of workingDocument.querySelectorAll(selector)) {
+              node.remove();
+            }
+          }
+          return workingDocument;
+        };
+        const scopedDocument = buildScopedDocument(document, stateOptions);
+        return build(scopedDocument, meta);
       },
       {
         fnSource: source,
         meta: {
           sessionId: this.sessionId,
           pageId: this.pageId
-        }
+        },
+        stateOptions: this.stateOptions
       }
     );
+  }
+
+  async getObservationSnapshots(backend: ObservationBackend): Promise<ObservationSnapshot[]> {
+    const snapshots: ObservationSnapshot[] = [];
+    for (const candidate of fallbackChainFor(backend)) {
+      try {
+        const snapshot = await this.captureObservation(candidate);
+        snapshots.push(snapshot);
+        if (snapshot.status === "captured" || snapshot.status === "fallback") {
+          return snapshots;
+        }
+      } catch (error) {
+        snapshots.push({
+          backend: candidate,
+          status: "failed",
+          capturedAt: new Date().toISOString(),
+          summary: { supportLevel: "unavailable" },
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+    }
+    return snapshots;
+  }
+
+  getRuntimeSummary(): AuditRuntimeSummary {
+    const statusCodes: Record<string, number> = {};
+    for (const event of this.networkEvents) {
+      if (event.status !== null) {
+        const key = String(event.status);
+        statusCodes[key] = (statusCodes[key] ?? 0) + 1;
+      }
+    }
+    return {
+      network: {
+        requests: this.networkEvents.length,
+        failedRequests: this.networkEvents.filter((event) => event.failed).length,
+        statusCodes,
+        sampledUrls: this.networkEvents.map((event) => `${event.method} ${event.url}`).slice(-25)
+      },
+      console: {
+        messages: this.consoleEvents.length,
+        errors: this.consoleEvents.filter((event) => event.type === "error").length,
+        warnings: this.consoleEvents.filter((event) => event.type === "warning").length,
+        samples: this.consoleEvents.map((event) => `${event.type}: ${event.text}`).slice(-25)
+      }
+    };
   }
 
   async getCurrentUrl(): Promise<string> {
@@ -962,6 +1471,83 @@ class PlaywrightPageAuditDriver implements AuditBrowserDriver {
 
   private log(message: string): void {
     this.logs.push(`[${new Date().toISOString()}] ${message}`);
+  }
+
+  private async captureObservation(backend: ObservationBackend): Promise<ObservationSnapshot> {
+    if (backend === "cdp_ax_tree") {
+      return this.captureCdpAccessibilityTree();
+    }
+    if (backend === "playwright_aria") {
+      return this.capturePlaywrightAriaSnapshot();
+    }
+    const state = await this.getStructuredState();
+    return {
+      backend: "dom_semantic",
+      status: backend === "dom_semantic" ? "captured" : "fallback",
+      capturedAt: new Date().toISOString(),
+      summary: summarizeStructuredState(state)
+    };
+  }
+
+  private async captureCdpAccessibilityTree(): Promise<ObservationSnapshot> {
+    const session = await this.page.context().newCDPSession(this.page);
+    try {
+      const result = await session.send("Accessibility.getFullAXTree");
+      const resultRecord = asRecord(result);
+      const nodes = Array.isArray(resultRecord?.nodes) ? resultRecord.nodes : [];
+      const roles: Record<string, number> = {};
+      const namedNodeSamples: string[] = [];
+      for (const node of nodes) {
+        const nodeRecord = asRecord(node);
+        if (!nodeRecord) {
+          continue;
+        }
+        const role = cdpPropertyValue(nodeRecord.role) ?? "unknown";
+        const name = cdpPropertyValue(nodeRecord.name);
+        roles[role] = (roles[role] ?? 0) + 1;
+        if (name && namedNodeSamples.length < 25) {
+          namedNodeSamples.push(`${role}: ${name}`);
+        }
+      }
+      return {
+        backend: "cdp_ax_tree",
+        status: "captured",
+        capturedAt: new Date().toISOString(),
+        summary: {
+          nodeCount: nodes.length,
+          roles,
+          namedNodeSamples,
+          supportLevel: "native_cdp"
+        }
+      };
+    } finally {
+      await session.detach().catch(() => undefined);
+    }
+  }
+
+  private async capturePlaywrightAriaSnapshot(): Promise<ObservationSnapshot> {
+    const snapshot = await this.page.ariaSnapshot({ mode: "ai", timeout: 5000 });
+    const lines = snapshot.split("\n").map((line) => line.trim()).filter(Boolean);
+    const roleCounts: Record<string, number> = {};
+    for (const line of lines) {
+      const match = /^-\s*([a-zA-Z0-9_-]+)/.exec(line);
+      if (match) {
+        roleCounts[match[1]] = (roleCounts[match[1]] ?? 0) + 1;
+      }
+    }
+    return {
+      backend: "playwright_aria",
+      status: "captured",
+      capturedAt: new Date().toISOString(),
+      summary: {
+        lineCount: lines.length,
+        charCount: snapshot.length,
+        roleCounts,
+        referenceCount: (snapshot.match(/\[ref=/g) ?? []).length,
+        samples: lines.slice(0, 30),
+        supportLevel: "native_playwright_aria"
+      }
+    };
   }
 }
 
@@ -1008,6 +1594,51 @@ function issue(id: string, input: InternalIssueInput): AuditIssue {
     recommendation: input.recommendation ?? metadata?.recommendation,
     helpUrl: `https://github.com/yul761/AgentRunTimeBrowser#${id}`
   };
+}
+
+function issueKey(issueItem: AuditIssue): string {
+  return `${issueItem.ruleId}:${issueItem.title}`;
+}
+
+function resolveReportOutputs(report: AuditReport, outputs: AuditReportOutputs): Required<Pick<AuditReportOutputs, "json" | "html" | "markdown" | "sarif" | "junit">> & { replay?: string } {
+  if (!outputs.artifactDir) {
+    return {
+      json: outputs.json ?? "",
+      html: outputs.html ?? "",
+      markdown: outputs.markdown ?? "",
+      sarif: outputs.sarif ?? "",
+      junit: outputs.junit ?? ""
+    };
+  }
+  const safeReportId = report.reportId.replace(/[^a-zA-Z0-9_-]/g, "");
+  const prefix = resolve(process.cwd(), outputs.artifactDir, `agentability-${safeReportId}`);
+  return {
+    json: outputs.json ?? `${prefix}.json`,
+    html: outputs.html ?? `${prefix}.html`,
+    markdown: outputs.markdown ?? `${prefix}.md`,
+    sarif: outputs.sarif ?? `${prefix}.sarif`,
+    junit: outputs.junit ?? `${prefix}.junit.xml`,
+    replay: `${prefix}.replay.json`
+  };
+}
+
+function renderReportOutput(kind: string, report: AuditReport): string {
+  switch (kind) {
+    case "json":
+      return `${JSON.stringify(report, null, 2)}\n`;
+    case "html":
+      return formatHtmlReport(report);
+    case "markdown":
+      return formatMarkdownReport(report);
+    case "sarif":
+      return formatSarifReport(report);
+    case "junit":
+      return formatJunitReport(report);
+    case "replay":
+      return `${JSON.stringify({ reportId: report.reportId, generatedAt: report.generatedAt, replay: report.replay }, null, 2)}\n`;
+    default:
+      throw new Error(`Unsupported report output kind: ${kind}`);
+  }
 }
 
 function applyRuleConfig(issues: AuditIssue[], config: RuleConfig): AuditIssue[] {
@@ -1069,8 +1700,25 @@ function normalizeObservationBackend(backend: ObservationBackend | undefined): O
   return value;
 }
 
-function selectedObservationBackend(_requested: ObservationBackend): ObservationBackend {
-  return "dom_semantic";
+async function collectObservationSnapshots(driver: AuditBrowserDriver, requested: ObservationBackend): Promise<ObservationSnapshot[]> {
+  if (driver.getObservationSnapshots) {
+    const snapshots = await driver.getObservationSnapshots(requested);
+    if (snapshots.length > 0) {
+      return snapshots;
+    }
+  }
+  const state = await driver.getStructuredState();
+  return [{
+    backend: "dom_semantic",
+    status: "fallback",
+    capturedAt: new Date().toISOString(),
+    summary: summarizeStructuredState(state)
+  }];
+}
+
+function selectedObservationBackend(observations: ObservationSnapshot[], requested: ObservationBackend): ObservationBackend {
+  const captured = observations.find((observation) => observation.status === "captured" || observation.status === "fallback");
+  return captured?.backend ?? (requested === "auto" ? "dom_semantic" : requested);
 }
 
 function fallbackChainFor(requested: ObservationBackend): ObservationBackend[] {
@@ -1084,6 +1732,131 @@ function fallbackChainFor(requested: ObservationBackend): ObservationBackend[] {
     return ["cdp_ax_tree", "dom_semantic"];
   }
   return ["cdp_ax_tree", "playwright_aria", "dom_semantic"];
+}
+
+function summarizeStructuredState(state: StructuredState): Record<string, unknown> {
+  return {
+    url: state.url,
+    title: state.title,
+    buttons: state.buttons.length,
+    inputs: state.inputs.length,
+    links: state.links.length,
+    headings: state.headings.length,
+    forms: state.forms.length,
+    actions: state.actionGraph.actions.length,
+    regions: state.regions.map((region) => region.kind),
+    supportLevel: "semantic_dom"
+  };
+}
+
+function summarizeStateDelta(task: AuditTask, beforeState: StructuredState, afterState: StructuredState): Record<string, unknown> {
+  const delta = computeStateDelta(`audit-${task}`, beforeState, afterState);
+  return {
+    fromStateId: delta.fromStateId,
+    toStateId: delta.toStateId,
+    urlChanged: delta.urlChanged,
+    titleChanged: delta.titleChanged,
+    elementsAdded: delta.elementsAdded.length,
+    elementsRemoved: delta.elementsRemoved.length,
+    actionsAdded: delta.actionsAdded.length,
+    actionsRemoved: delta.actionsRemoved.length,
+    majorTextChanges: delta.majorTextChanges.length,
+    dialogChanges: delta.dialogChanges.length
+  };
+}
+
+function summarizeRuntimeDiff(
+  before: AuditNetworkSummary | undefined,
+  after: AuditNetworkSummary | undefined
+): AuditNetworkSummary | undefined {
+  if (!after) {
+    return undefined;
+  }
+  if (!before) {
+    return after;
+  }
+  return {
+    requests: Math.max(0, after.requests - before.requests),
+    failedRequests: Math.max(0, after.failedRequests - before.failedRequests),
+    statusCodes: subtractStatusCodes(before.statusCodes, after.statusCodes),
+    sampledUrls: after.sampledUrls.slice(before.sampledUrls.length).slice(0, 12)
+  };
+}
+
+function summarizeConsoleDiff(
+  before: AuditConsoleSummary | undefined,
+  after: AuditConsoleSummary | undefined
+): AuditConsoleSummary | undefined {
+  if (!after) {
+    return undefined;
+  }
+  if (!before) {
+    return after;
+  }
+  return {
+    messages: Math.max(0, after.messages - before.messages),
+    errors: Math.max(0, after.errors - before.errors),
+    warnings: Math.max(0, after.warnings - before.warnings),
+    samples: after.samples.slice(before.samples.length).slice(0, 12)
+  };
+}
+
+function subtractStatusCodes(before: Record<string, number>, after: Record<string, number>): Record<string, number> {
+  const result: Record<string, number> = {};
+  for (const [status, count] of Object.entries(after)) {
+    const diff = count - (before[status] ?? 0);
+    if (diff > 0) {
+      result[status] = diff;
+    }
+  }
+  return result;
+}
+
+function buildTrendSummary(
+  scores: AuditScores,
+  issues: AuditIssue[],
+  probes: AuditTaskProbe[]
+): AuditReport["trend"] {
+  return {
+    score: scores.overall,
+    issueCount: issues.length,
+    issueCountsBySeverity: {
+      high: issues.filter((issueItem) => issueItem.severity === "high").length,
+      medium: issues.filter((issueItem) => issueItem.severity === "medium").length,
+      low: issues.filter((issueItem) => issueItem.severity === "low").length,
+      info: issues.filter((issueItem) => issueItem.severity === "info").length
+    },
+    probeStatusCounts: {
+      passed: probes.filter((probe) => probe.status === "passed").length,
+      failed: probes.filter((probe) => probe.status === "failed").length,
+      skipped: probes.filter((probe) => probe.status === "skipped").length
+    }
+  };
+}
+
+function emitAuditEvent(
+  options: Pick<NormalizedAuditOptions, "onEvent">,
+  type: AuditEvent["type"],
+  input: Omit<AuditEvent, "type" | "timestamp">
+): void {
+  options.onEvent?.({
+    type,
+    timestamp: new Date().toISOString(),
+    ...input
+  });
+}
+
+function checkAbort(options: Pick<NormalizedAuditOptions, "signal">): void {
+  if (!options.signal) {
+    return;
+  }
+  if ("throwIfAborted" in options.signal && typeof options.signal.throwIfAborted === "function") {
+    options.signal.throwIfAborted();
+    return;
+  }
+  if (options.signal.aborted) {
+    throw new Error("Agentability audit was aborted.");
+  }
 }
 
 function validateAuditConfig(config: AuditConfig): void {
@@ -1113,6 +1886,13 @@ function validateRuleConfig(config: RuleConfig): void {
 
 function hasExplicitSponsoredRegion(state: StructuredState): boolean {
   return state.regions.some((region) => /sponsored|advertis/i.test(region.title ?? ""));
+}
+
+function containsPotentialSensitiveText(value: string): boolean {
+  return (
+    /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i.test(value) ||
+    /\b(?:api[_-]?key|token|secret|password)\s*[:=]\s*["']?[^"'\s]+/i.test(value)
+  );
 }
 
 function penaltyFor(issues: AuditIssue[], category: AuditCategory): number {
@@ -1200,6 +1980,45 @@ function redactState(
   };
 }
 
+function redactIssues(issues: AuditIssue[], patterns: Array<string | RegExp>): AuditIssue[] {
+  return issues.map((issueItem) => ({
+    ...issueItem,
+    title: redactText(issueItem.title, patterns),
+    message: redactText(issueItem.message, patterns),
+    recommendation: redactOptional(issueItem.recommendation, patterns),
+    evidence: issueItem.evidence ? redactRecord(issueItem.evidence, patterns) : undefined
+  }));
+}
+
+function redactObservationSnapshots(snapshots: ObservationSnapshot[], patterns: Array<string | RegExp>): ObservationSnapshot[] {
+  return snapshots.map((snapshot) => ({
+    ...snapshot,
+    error: redactOptional(snapshot.error, patterns),
+    summary: redactRecord(snapshot.summary, patterns)
+  }));
+}
+
+function redactRecord(record: Record<string, unknown>, patterns: Array<string | RegExp>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(record).map(([key, value]) => [key, redactUnknown(value, patterns)]));
+}
+
+function redactUnknown(value: unknown, patterns: Array<string | RegExp>): unknown {
+  if (typeof value === "string") {
+    return redactText(value, patterns);
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => redactUnknown(item, patterns));
+  }
+  if (isPlainRecord(value)) {
+    return redactRecord(value, patterns);
+  }
+  return value;
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function redactIdentity<T extends SemanticIdentity>(identity: T, patterns: Array<string | RegExp>): T {
   return {
     ...identity,
@@ -1232,6 +2051,36 @@ function redactText(value: string, patterns: Array<string | RegExp>): string {
     }
     return next.replace(pattern, "[redacted]");
   }, value);
+}
+
+function sanitizeUrlForEvidence(value: string): string {
+  try {
+    const url = new URL(value);
+    for (const key of [...url.searchParams.keys()]) {
+      if (/token|secret|key|password|session/i.test(key)) {
+        url.searchParams.set(key, "[redacted]");
+      }
+    }
+    return url.href;
+  } catch {
+    return value.slice(0, 200);
+  }
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function cdpPropertyValue(value: unknown): string | undefined {
+  const record = asRecord(value);
+  const raw = record?.value;
+  if (typeof raw === "string") {
+    return raw.trim() || undefined;
+  }
+  if (typeof raw === "number" || typeof raw === "boolean") {
+    return String(raw);
+  }
+  return undefined;
 }
 
 function defaultRedactions(): Array<string | RegExp> {

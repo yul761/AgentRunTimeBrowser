@@ -12,3 +12,8 @@
 - Adds rule metadata APIs, rule severity overrides, and rule suppressions.
 - Adds SARIF and JUnit report output for CI systems.
 - Adds `defineConfig`, `auditProject`, and CLI commands for init, rules, explain, and report rendering.
+- Adds native CDP Accessibility tree and Playwright ARIA/AI snapshot observation evidence.
+- Adds replay evidence, DOM delta summaries, network summaries, console summaries, and per-probe timings.
+- Adds `writeAuditReports`, `diffAuditReports`, `hasBlockingIssues`, and `validateConfig` SDK helpers.
+- Adds CLI support for named config targets, headers, viewport, artifact directories, report diffing, config validation, and opening HTML reports.
+- Adds first-party GitHub Action wrapper, sample config/report artifacts, and release checklist.
